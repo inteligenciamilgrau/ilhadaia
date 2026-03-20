@@ -104,6 +104,11 @@ class TournamentConfig(BaseModel):
     reset_on_finish: bool = True
 
 
+class ResetRequest(BaseModel):
+    player_count: int = 4
+    game_mode: str = "survival"
+
+
 class AISettingsRequest(BaseModel):
     ai_provider: str
     ai_model: str
@@ -162,7 +167,7 @@ async def lifespan(app: FastAPI):
         "ai_model": world.ai_model,
         "omniroute_url": world.omniroute_url,
     }
-    _current_session_id = session_store.create_session(_world_settings)
+    _current_session_id = session_store.create_session(_world_settings, game_mode=world.game_mode)
     world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
     replay_store.start_session(_current_session_id)
@@ -261,23 +266,54 @@ class ConnectionManager:
 manager = ConnectionManager()
 
 async def _dispatch_webhooks_from_events(events: list[dict]) -> None:
-    """Dispara webhooks para eventos críticos sem impactar o game loop."""
+    """F11: Dispara webhooks para eventos críticos (expandido com 16 tipos)."""
     tasks = []
     for event in events:
-        action = event.get("action")
-        if action == "die":
-            tasks.append(webhook_manager.fire_event("death", {
-                "agent_id": event.get("agent_id", ""),
-                "agent_name": event.get("name", ""),
-                "tick": world.ticks,
-                "event_msg": event.get("event_msg", ""),
-            }))
+        action = event.get("action", "")
+        base = {
+            "agent_id": event.get("agent_id", ""),
+            "agent_name": event.get("name", ""),
+            "tick": world.ticks,
+            "event_msg": event.get("event_msg", ""),
+            "game_mode": world.game_mode,
+        }
+        # Eventos originais
+        if action in ("die", "death"):
+            tasks.append(webhook_manager.fire_event("agent_dead", base))
         elif action == "zombie":
-            tasks.append(webhook_manager.fire_event("zombie", {
-                "agent_id": event.get("agent_id", ""),
-                "agent_name": event.get("name", ""),
-                "tick": world.ticks,
-                "event_msg": event.get("event_msg", ""),
+            tasks.append(webhook_manager.fire_event("zombie", base))
+        # F04 — Eventos dinâmicos / F12 — Gincana / F13-F16 — Warfare / F20 — GangWar
+        elif action == "checkpoint_captured":
+            tasks.append(webhook_manager.fire_event("checkpoint_captured", base))
+        elif action == "artifact_delivered":
+            tasks.append(webhook_manager.fire_event("artifact_delivered", base))
+        elif action == "gincana_end":
+            tasks.append(webhook_manager.fire_event("gincana_end", {
+                **base, "gincana": world.gincana.get_state()
+            }))
+        elif action == "warfare_end":
+            tasks.append(webhook_manager.fire_event("warfare_end", {
+                **base, "warfare": world.warfare.get_state()
+            }))
+        elif action == "gangwar_end":
+            tasks.append(webhook_manager.fire_event("gangwar_end", {
+                **base, "gangwar": world.gangwar.get_state()
+            }))
+        elif action == "sabotage":
+            tasks.append(webhook_manager.fire_event("sabotage", base))
+        # F17 — Trade / F18 — Mercado / F19 — Contratos
+        elif action == "trade":
+            tasks.append(webhook_manager.fire_event("trade", base))
+        elif action == "market_buy":
+            tasks.append(webhook_manager.fire_event("market_buy", base))
+        elif action == "market_sell":
+            tasks.append(webhook_manager.fire_event("market_sell", base))
+        elif action == "contract_fulfilled":
+            tasks.append(webhook_manager.fire_event("contract_fulfilled", base))
+        # Genérico: winner_declared
+        elif action in ("win", "winner_declared"):
+            tasks.append(webhook_manager.fire_event("winner_declared", {
+                **base, "winner": event.get("agent_id")
             }))
     if tasks:
         await asyncio.gather(*tasks, return_exceptions=True)
@@ -352,36 +388,39 @@ def read_root():
         "started": world.started,
         "session_id": _current_session_id,
         "agents": len(world.agents),
+        "game_mode": world.game_mode,
     }
 
-@app.get("/world/state")
-def get_world_state():
-    return world.get_state()
-
-@app.post("/reset")
-async def reset_game(player_count: int = 4):
+@app.post("/reset", dependencies=[Depends(verify_admin_token)])
+async def reset_game(req: ResetRequest = ResetRequest()):
     global _current_session_id
-    world.started = True # Start the game on reset
+    # Valida game_mode
+    valid_modes = set(World.MODE_SIZES.keys())
+    game_mode = req.game_mode if req.game_mode in valid_modes else "survival"
     if _current_session_id:
         for agent in world.agents:
             if getattr(agent, "owner_id", ""):
                 memory_store.save(agent)
         replay_store.force_snapshot(world.ticks, world.get_state())
         session_store.end_session(_current_session_id, None, None)
+    # Atualizar game_mode no mundo
+    world.game_mode = game_mode
     _world_settings = {
         "ai_interval": world.ai_interval,
         "player_count": world.player_count,
         "ai_provider": world.ai_provider,
         "ai_model": world.ai_model,
         "omniroute_url": world.omniroute_url,
+        "game_mode": game_mode,
     }
-    _current_session_id = session_store.create_session(_world_settings)
+    _current_session_id = session_store.create_session(_world_settings, game_mode=game_mode)
     world.set_session_id(_current_session_id)
     decision_log.start_session(_current_session_id)
     replay_store.start_session(_current_session_id)
-    world.reset_agents(Agent, player_count=player_count)
+    world.reset_agents(Agent, player_count=req.player_count)
+    world.started = True  # Auto-start the newly reset world
     await manager.broadcast({"type": "reset", "data": world.get_state()})
-    return {"status": "World reset successful", "player_count": player_count, "session_id": _current_session_id}
+    return {"status": "World reset successful", "player_count": req.player_count, "game_mode": game_mode, "session_id": _current_session_id}
 
 @app.post("/settings/ai_interval")
 async def set_ai_interval(interval: int):
@@ -1045,6 +1084,260 @@ async def update_agent_profile(agent_id: str, up: AgentProfileUpdate):
 
     raise HTTPException(status_code=404, detail="Agente não encontrado")
 
+
+# ═══════════════════════════════════════════════════════════════════════
+# F01 — Modo Comandante por Linguagem Natural
+# ═══════════════════════════════════════════════════════════════════════
+
+class CommandRequest(BaseModel):
+    command: str
+    expire_ticks: int = 30  # Número de ticks antes de expirar
+
+
+@app.post("/agents/{agent_id}/command")
+async def set_agent_command(agent_id: str, req: CommandRequest):
+    """F01: Define um comando humano para o agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if not agent.is_alive:
+        raise HTTPException(400, "Agent is dead")
+    agent.human_command = req.command.strip()
+    agent.command_expire_tick = world.ticks + req.expire_ticks
+    agent.command_source = "human"
+    logger.info(f"F01: Command set for {agent.name}: '{agent.human_command}' (expires tick {agent.command_expire_tick})")
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🎮 Operador enviou comando para {agent.name}: '{agent.human_command}'", "agent_id": agent_id}]
+    })
+    return {"status": "Command set", "agent_id": agent_id, "command": agent.human_command, "expires_at_tick": agent.command_expire_tick}
+
+
+@app.post("/agents/{agent_id}/command/cancel")
+async def cancel_agent_command(agent_id: str):
+    """F01: Cancela o comando humano ativo e libera o agente para autonomia."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    agent.human_command = None
+    agent.command_expire_tick = 0
+    agent.command_source = "ai"
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔓 {agent.name} liberado para autonomia.", "agent_id": agent_id}]
+    })
+    return {"status": "Command cancelled", "agent_id": agent_id}
+
+
+@app.get("/agents/{agent_id}/command")
+async def get_agent_command(agent_id: str):
+    """F01: Retorna o estado atual do comando humano do agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    is_active = (
+        agent.human_command is not None and
+        world.ticks < agent.command_expire_tick
+    )
+    return {
+        "agent_id": agent_id,
+        "human_command": agent.human_command if is_active else None,
+        "command_source": agent.command_source,
+        "expires_at_tick": agent.command_expire_tick,
+        "is_active": is_active,
+        "ticks_remaining": max(0, agent.command_expire_tick - world.ticks) if is_active else 0,
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F03 — Decision Inspector
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/agents/{agent_id}/decisions")
+async def get_agent_decisions(agent_id: str, n: int = 5):
+    """F03: Retorna as últimas N decisões de um agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if _current_session_id is None:
+        return {"agent_id": agent_id, "decisions": []}
+    decisions = decision_log.get_recent(_current_session_id, agent_id, n=min(n, 20))
+    return {"agent_id": agent_id, "agent_name": agent.name, "decisions": decisions}
+
+
+@app.get("/agents/{agent_id}/memory/relevant")
+async def get_agent_memory(agent_id: str):
+    """F03: Retorna a memória relevante do agente (short_term + episodic resumidos)."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    mem_dict = agent.agent_memory.to_dict() if hasattr(agent, "agent_memory") else {}
+    return {
+        "agent_id": agent_id,
+        "agent_name": agent.name,
+        "short_term": mem_dict.get("short_term", [])[-10:],
+        "episodic": mem_dict.get("episodic", [])[-5:],
+        "relational": mem_dict.get("relational", {}),
+        "tokens_used": getattr(agent, "tokens_used", 0),
+        "token_budget": getattr(agent, "token_budget", 10000),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F05 — Console de Intervenção Admin ao Vivo
+# ═══════════════════════════════════════════════════════════════════════
+
+class AdminSpawnRequest(BaseModel):
+    type: str                     # tipo do objeto (stone, tree, supply_crate, etc)
+    x: int
+    y: int
+    extra: dict = {}              # campos extras opcionais
+
+
+class AdminEventRequest(BaseModel):
+    event_type: str               # tempestade, seca, radio, suprimentos, eclipse
+    message: str = ""
+
+
+class AdminProfileRequest(BaseModel):
+    agent_id: str
+    profile_id: str
+
+
+class AdminProfilePathRequest(BaseModel):
+    profile_id: str
+
+
+class AdminWorldPatchRequest(BaseModel):
+    started: Optional[bool] = None
+    ai_interval: Optional[int] = None
+    game_over: Optional[bool] = None
+    event_chance: Optional[float] = None
+
+
+@app.post("/admin/spawn", dependencies=[Depends(verify_admin_token)])
+async def admin_spawn(req: AdminSpawnRequest):
+    """F05: Spawna um objeto no mapa. Requer X-Admin-Token."""
+    if not (0 <= req.x < world.size and 0 <= req.y < world.size):
+        raise HTTPException(400, f"Coordenadas fora do mapa {world.size}x{world.size}")
+    entity_id = f"admin_spawn_{req.type}_{world.ticks}_{req.x}_{req.y}"
+    obj = {"type": req.type, "x": req.x, "y": req.y, **req.extra}
+    world.add_entity(entity_id, obj)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔧 Admin criou {req.type} em ({req.x},{req.y})"}]
+    })
+    return {"status": "spawned", "entity_id": entity_id, "object": obj}
+
+
+@app.post("/admin/event", dependencies=[Depends(verify_admin_token)])
+async def admin_trigger_event(req: AdminEventRequest):
+    """F05: Dispara um evento global na ilha. Requer X-Admin-Token."""
+    event_messages = {
+        "tempestade": "⛈️ UMA TEMPESTADE VIOLENTA VARREU A ILHA! Todos perdem 5HP!",
+        "seca": "🌵 A SECA CHEGOU! Recursos de água estão escassos por 30 ticks.",
+        "suprimentos": "📦 UM CRATE DE SUPRIMENTOS CAIU DO CÉU!",
+        "radio": "📻 Um rádio misterioso emite sinais da ilha...",
+        "eclipse": "🌑 ECLIPSE TOTAL! A ilha mergulhou na escuridão.",
+    }
+    msg = req.message or event_messages.get(req.event_type, f"🚨 Evento: {req.event_type}")
+
+    # Efeitos do evento tempestade
+    if req.event_type == "tempestade":
+        for agent in world.agents:
+            if agent.is_alive and not getattr(agent, "is_zombie", False):
+                agent.hp = max(0, agent.hp - 5)
+
+    # Efeito suprimentos: spawnar supply crate no centro
+    if req.event_type == "suprimentos":
+        cx, cy = world.size // 2 + random.randint(-3, 3), world.size // 2 + random.randint(-3, 3)
+        world.add_entity(f"event_crate_{world.ticks}", {
+            "type": "supply_crate", "x": cx, "y": cy,
+            "name": "Crate Admin", "loot": ["fruit", "water_bottle"]
+        })
+
+    world.ai_events.append({"action": "busy", "event_msg": msg})
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": msg}]
+    })
+    return {"status": "event_triggered", "event_type": req.event_type, "message": msg}
+
+
+@app.post("/admin/world/patch", dependencies=[Depends(verify_admin_token)])
+async def admin_world_patch(req: AdminWorldPatchRequest):
+    """F05: Aplica patch controlado em parâmetros do mundo ao vivo."""
+    applied = {}
+    if req.started is not None:
+        world.started = req.started
+        applied["started"] = world.started
+    if req.ai_interval is not None:
+        if req.ai_interval < 0:
+            raise HTTPException(400, "ai_interval deve ser >= 0")
+        world.ai_interval = req.ai_interval
+        applied["ai_interval"] = world.ai_interval
+    if req.game_over is not None:
+        world.game_over = req.game_over
+        applied["game_over"] = world.game_over
+    if req.event_chance is not None:
+        if not (0.0 <= req.event_chance <= 1.0):
+            raise HTTPException(400, "event_chance deve estar entre 0 e 1")
+        world.event_chance = req.event_chance
+        applied["event_chance"] = world.event_chance
+
+    if not applied:
+        raise HTTPException(400, "Nenhum campo de patch enviado")
+
+    await manager.broadcast({
+        "type": "update",
+        "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🛠️ Admin aplicou patch no mundo: {applied}"}],
+    })
+    return {"status": "patched", "applied": applied, "world_state": world.get_state()}
+
+
+@app.post("/admin/agent/profile", dependencies=[Depends(verify_admin_token)])
+async def admin_change_profile(req: AdminProfileRequest):
+    """F05: Altera o perfil de IA de um agente ao vivo. Requer X-Admin-Token."""
+    from runtime.profiles import BUILTIN_PROFILES, get_profile
+    agent = next((a for a in world.agents if a.id == req.agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agent not found")
+    if req.profile_id not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil '{req.profile_id}' não encontrado. Disponíveis: {list(BUILTIN_PROFILES.keys())}")
+    old_profile = agent.profile_id
+    agent.profile_id = req.profile_id
+    profile = get_profile(req.profile_id)
+    agent.token_budget = profile.token_budget
+    agent.cooldown_ticks = profile.cooldown_ticks
+    logger.info(f"F05: Profile of {agent.name} changed {old_profile} → {req.profile_id}")
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔄 Admin: {agent.name} trocou de perfil para '{req.profile_id}'"}]
+    })
+    return {"status": "profile_changed", "agent_id": req.agent_id, "old_profile": old_profile, "new_profile": req.profile_id}
+
+
+@app.post("/admin/agent/{agent_id}/profile", dependencies=[Depends(verify_admin_token)])
+async def admin_change_profile_by_path(agent_id: str, req: AdminProfilePathRequest):
+    """F05: Alias RESTful para alteração de perfil de agente por path param."""
+    return await admin_change_profile(AdminProfileRequest(agent_id=agent_id, profile_id=req.profile_id))
+
+
+@app.get("/admin/world/state")
+async def admin_world_state(x_admin_token: str = Header(None)):
+    """F05: Retorna estado detalhado do mundo para admin (inclui todos os campos)."""
+    if x_admin_token != ADMIN_TOKEN:
+        raise HTTPException(401, "Unauthorized")
+    state = world.get_state()
+    state["game_mode"] = world.game_mode
+    state["world_size"] = world.size
+    state["pending_spawns"] = len(world.pending_spawns)
+    state["thinking_agents"] = list(world.thinking_agents)
+    return state
+
+
+
 # ═══════════════════════════════════════════════════════════════════════
 # T18 — Rate Limiting (slowapi)
 # ═══════════════════════════════════════════════════════════════════════
@@ -1216,6 +1509,12 @@ class WebhookRegistration(BaseModel):
     events: list[str] = ["all"]
     secret: str = ""
 
+
+class WebhookTestRequest(BaseModel):
+    owner_id: str
+
+
+@app.post("/webhooks")
 @app.post("/webhooks/register")
 @_rate_limit("20/hour")
 async def register_webhook(request: Request, reg: WebhookRegistration):
@@ -1230,6 +1529,20 @@ async def register_webhook(request: Request, reg: WebhookRegistration):
         secret=reg.secret,
     )
     return result
+
+
+@app.post("/webhooks/test", dependencies=[Depends(verify_admin_token)])
+async def test_webhook_alias(req: WebhookTestRequest):
+    """F11: Alias de teste de webhook com owner_id no body."""
+    return await test_webhook(req.owner_id)
+
+
+@app.get("/webhooks/deliveries", dependencies=[Depends(verify_admin_token)])
+async def webhooks_deliveries(webhook_id: Optional[str] = None, limit: int = 50):
+    """F11: Retorna histórico de entregas de webhooks."""
+    history = webhook_manager.get_delivery_history(webhook_id=webhook_id, limit=limit)
+    return {"count": len(history), "deliveries": history}
+
 
 @app.get("/webhooks/{owner_id}")
 async def list_webhooks(owner_id: str):
@@ -1280,3 +1593,1071 @@ async def system_info():
         "registered_webhooks": webhook_manager.conn.execute("SELECT COUNT(*) FROM webhooks").fetchone()[0],
         "agents_with_memory": len(memory_store.list_agents_with_memory()),
     }
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F06 — Temporadas e Ranking ELO
+# ═══════════════════════════════════════════════════════════════════════
+
+class SeasonRequest(BaseModel):
+    name: str
+    game_mode: str = "survival"
+    description: str = ""
+
+
+@app.post("/seasons", dependencies=[Depends(verify_admin_token)])
+async def create_season(req: SeasonRequest):
+    """F06: Cria uma nova temporada. Requer X-Admin-Token."""
+    sid = session_store.create_season(req.name, req.game_mode, req.description)
+    return {"status": "created", "season_id": sid, "name": req.name, "game_mode": req.game_mode}
+
+
+@app.get("/seasons")
+async def list_seasons():
+    """F06: Lista todas as temporadas."""
+    return {"seasons": session_store.get_seasons()}
+
+
+@app.post("/seasons/{season_id}/end", dependencies=[Depends(verify_admin_token)])
+async def end_season(season_id: str):
+    """F06: Encerra uma temporada. Requer X-Admin-Token."""
+    session_store.end_season(season_id)
+    return {"status": "ended", "season_id": season_id}
+
+
+@app.get("/seasons/{season_id}/leaderboard")
+async def season_leaderboard(season_id: str):
+    """F06: Retorna o leaderboard ELO da temporada."""
+    return {"season_id": season_id, "leaderboard": session_store.get_leaderboard_elo(season_id)}
+
+
+@app.post("/seasons/{season_id}/record", dependencies=[Depends(verify_admin_token)])
+async def record_elo_session(season_id: str, session_id: str = None):
+    """F06: Calcula e persiste o ELO dos agentes com base na sessão atual.
+    Usa o placar dos agentes vivos ordenado por score_total DESC.
+    """
+    target_session = session_id or _current_session_id
+    if not target_session:
+        raise HTTPException(400, "Nenhuma sessão ativa")
+
+    # Monta placements a partir dos agentes atuais
+    placements = sorted(
+        [{"profile_id": getattr(a, "profile_id", "claude-kiro"),
+          "score_total": a.benchmark.get("score", 0.0),
+          "agent_name": a.name}
+         for a in world.agents],
+        key=lambda x: -x["score_total"]
+    )
+    if not placements:
+        raise HTTPException(400, "Nenhum agente encontrado")
+
+    results = session_store.record_elo_session(season_id, target_session, placements)
+    return {"status": "recorded", "season_id": season_id, "session_id": target_session, "results": results}
+
+
+@app.get("/elo/{profile_id}")
+async def get_profile_elo(profile_id: str, season_id: str = None):
+    """F06: Retorna o ELO de um perfil (na temporada especificada ou em todas)."""
+    if season_id:
+        elo = session_store.get_elo(season_id, profile_id)
+        return {"profile_id": profile_id, "season_id": season_id, "elo": elo}
+    # Todas as temporadas
+    seasons = session_store.get_seasons()
+    result = {
+        "profile_id": profile_id,
+        "elo_by_season": {
+            s["id"]: {"name": s["name"], "elo": session_store.get_elo(s["id"], profile_id)}
+            for s in seasons
+        }
+    }
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F02 — Comparador A/B de Perfis
+# ═══════════════════════════════════════════════════════════════════════
+
+class ABRequest(BaseModel):
+    profile_a: str
+    profile_b: str
+    game_mode: str = "survival"
+    ticks: int = 200        # duração em ticks
+
+
+@app.post("/benchmarks/ab", dependencies=[Depends(verify_admin_token)])
+@app.post("/ab/compare", dependencies=[Depends(verify_admin_token)])
+async def ab_compare(req: ABRequest):
+    """F02: Registra manualmente um resultado A/B a partir do estado atual da sessão.
+    Compara os dois primeiros agentes que usam os profiles indicados.
+    """
+    from runtime.profiles import BUILTIN_PROFILES
+    from uuid import uuid4
+
+    if req.profile_a not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil A '{req.profile_a}' não encontrado")
+    if req.profile_b not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil B '{req.profile_b}' não encontrado")
+
+    agents_a = [a for a in world.agents if getattr(a, "profile_id", "") == req.profile_a]
+    agents_b = [a for a in world.agents if getattr(a, "profile_id", "") == req.profile_b]
+
+    if not agents_a:
+        raise HTTPException(400, f"Nenhum agente ativo com perfil '{req.profile_a}'")
+    if not agents_b:
+        raise HTTPException(400, f"Nenhum agente ativo com perfil '{req.profile_b}'")
+
+    ag_a = agents_a[0]
+    ag_b = agents_b[0]
+
+    run_id = str(uuid4())
+    result = session_store.record_ab_result(
+        run_id=run_id,
+        session_id=_current_session_id or "manual",
+        profile_a=req.profile_a,
+        profile_b=req.profile_b,
+        score_a=ag_a.benchmark.get("score", 0.0),
+        score_b=ag_b.benchmark.get("score", 0.0),
+        ticks_a=ag_a.benchmark.get("ticks_survived", 0),
+        ticks_b=ag_b.benchmark.get("ticks_survived", 0),
+        tokens_a=getattr(ag_a, "tokens_used", 0),
+        tokens_b=getattr(ag_b, "tokens_used", 0),
+        game_mode=req.game_mode,
+    )
+    return {"status": "recorded", **result}
+
+
+def _get_ab_run_or_404(run_id: str) -> dict:
+    cur = session_store.conn.execute(
+        "SELECT * FROM ab_results WHERE run_id=? ORDER BY recorded_at DESC LIMIT 1",
+        (run_id,),
+    )
+    row = cur.fetchone()
+    if not row:
+        raise HTTPException(404, f"Run A/B '{run_id}' não encontrado")
+    cols = [c[0] for c in cur.description]
+    return dict(zip(cols, row))
+
+
+@app.get("/benchmarks/ab/{run_id}")
+async def get_ab_run(run_id: str):
+    """F02: Retorna os detalhes de uma execução A/B específica."""
+    return {"run": _get_ab_run_or_404(run_id)}
+
+
+@app.get("/benchmarks/ab/{run_id}/report")
+async def get_ab_run_report(run_id: str):
+    """F02: Retorna relatório consolidado da execução A/B."""
+    run = _get_ab_run_or_404(run_id)
+    score_delta = float(run.get("score_a", 0.0)) - float(run.get("score_b", 0.0))
+    tokens_a = max(float(run.get("tokens_a", 0.0)), 1.0)
+    tokens_b = max(float(run.get("tokens_b", 0.0)), 1.0)
+    report = {
+        "run_id": run_id,
+        "winner": run.get("winner"),
+        "profiles": {"A": run.get("profile_a"), "B": run.get("profile_b")},
+        "scores": {"A": run.get("score_a", 0.0), "B": run.get("score_b", 0.0), "delta": score_delta},
+        "ticks": {"A": run.get("ticks_a", 0), "B": run.get("ticks_b", 0)},
+        "tokens": {"A": run.get("tokens_a", 0), "B": run.get("tokens_b", 0)},
+        "efficiency": {
+            "A_score_per_1k_tokens": round(float(run.get("score_a", 0.0)) / tokens_a * 1000, 4),
+            "B_score_per_1k_tokens": round(float(run.get("score_b", 0.0)) / tokens_b * 1000, 4),
+        },
+        "game_mode": run.get("game_mode"),
+        "recorded_at": run.get("recorded_at"),
+    }
+    return {"report": report, "raw": run}
+
+
+@app.get("/ab/results")
+async def get_ab_results(profile_a: str = None, profile_b: str = None, limit: int = 20):
+    """F02: Lista resultados de comparações A/B. Filtra por perfil se fornecido."""
+    results = session_store.get_ab_summary(profile_a=profile_a, profile_b=profile_b, limit=limit)
+    return {"count": len(results), "results": results}
+
+
+@app.get("/ab/stats")
+async def get_ab_stats():
+    """F02: Retorna estatísticas agregadas de vitórias/derrotas/empates por par de perfis."""
+    return {"stats": session_store.get_ab_stats()}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F09 — Versionamento de Perfis e Prompts
+# ═══════════════════════════════════════════════════════════════════════
+
+class ProfileVersionRequest(BaseModel):
+    note: str = ""
+    temperature: Optional[float] = None
+    max_tokens: Optional[int] = None
+    token_budget: Optional[int] = None
+    cooldown_ticks: Optional[int] = None
+    system_prompt_override: Optional[str] = None
+    created_by: str = "user"
+
+
+@app.post("/profiles/{profile_id}/versions", dependencies=[Depends(verify_admin_token)])
+async def save_profile_version(profile_id: str, req: ProfileVersionRequest):
+    """F09: Salva snapshot da versão atual de um perfil + overrides opcionais. Requer X-Admin-Token."""
+    from runtime.profiles import BUILTIN_PROFILES, get_profile
+    if profile_id not in BUILTIN_PROFILES:
+        raise HTTPException(400, f"Perfil '{profile_id}' não encontrado")
+
+    profile = get_profile(profile_id)
+    snapshot = {
+        "model": profile.model,
+        "provider": profile.provider,
+        "temperature": req.temperature if req.temperature is not None else profile.temperature,
+        "max_tokens": req.max_tokens if req.max_tokens is not None else profile.max_tokens,
+        "token_budget": req.token_budget if req.token_budget is not None else profile.token_budget,
+        "cooldown_ticks": req.cooldown_ticks if req.cooldown_ticks is not None else profile.cooldown_ticks,
+        "system_prompt_override": req.system_prompt_override or None,
+    }
+    version = session_store.save_profile_version(profile_id, snapshot, req.note, req.created_by)
+    return {"status": "saved", "profile_id": profile_id, "version": version, "snapshot": snapshot}
+
+
+@app.get("/profiles/{profile_id}/versions")
+async def list_profile_versions(profile_id: str):
+    """F09: Lista o histórico de versões de um perfil."""
+    versions = session_store.get_profile_versions(profile_id)
+    return {"profile_id": profile_id, "total": len(versions), "versions": versions}
+
+
+@app.get("/profiles/versions/all")
+async def list_all_profile_versions():
+    """F09: Lista o histórico global de todas as versões de perfis."""
+    return {"versions": session_store.get_profile_versions_all()}
+
+
+@app.post("/profiles/{profile_id}/activate/{version}", dependencies=[Depends(verify_admin_token)])
+@app.post("/profiles/{profile_id}/versions/{version}/rollback", dependencies=[Depends(verify_admin_token)])
+async def rollback_profile_version(profile_id: str, version: int):
+    """F09: Aplica snapshot de uma versão específica ao perfil ao vivo. Requer X-Admin-Token."""
+    snapshot = session_store.rollback_profile_version(profile_id, version)
+    if not snapshot:
+        raise HTTPException(404, f"Versão {version} do perfil '{profile_id}' não encontrada")
+
+    # Aplica snapshot aos agentes que usam este perfil
+    applied_to = []
+    for agent in world.agents:
+        if getattr(agent, "profile_id", "") == profile_id:
+            if "token_budget" in snapshot:
+                agent.token_budget = snapshot["token_budget"]
+            if "cooldown_ticks" in snapshot:
+                agent.cooldown_ticks = snapshot["cooldown_ticks"]
+            applied_to.append(agent.name)
+
+    logger.info(f"F09: Rollback {profile_id} → v{version} aplicado a {applied_to}")
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🔄 Perfil '{profile_id}' revertido para v{version}"}]
+    })
+    return {"status": "rolled_back", "profile_id": profile_id, "version": version,
+            "snapshot": snapshot, "applied_to_agents": applied_to}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F04 — Eventos Dinâmicos da Ilha
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/events/active")
+async def get_active_event():
+    """F04: Retorna o evento global ativo no momento."""
+    return {"active_event": world.active_event, "ticks": world.ticks}
+
+
+@app.get("/events/history")
+async def get_event_history():
+    """F04: Retorna o histórico de todos os eventos da sessão."""
+    return {"count": len(world.event_history), "events": world.event_history}
+
+
+@app.post("/events/trigger", dependencies=[Depends(verify_admin_token)])
+async def trigger_event_manual(event_type: str):
+    """F04: Dispara um evento global manualmente. Requer X-Admin-Token."""
+    if event_type not in world.DYNAMIC_EVENTS:
+        raise HTTPException(400, f"Tipo inválido. Válidos: {list(world.DYNAMIC_EVENTS.keys())}")
+    event = world.trigger_event(event_type)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "event", "event_msg": f"{event['name']}: {event['message']}"}]
+    })
+    return {"status": "triggered", "event": event}
+
+
+@app.get("/events/templates")
+@app.get("/events/types")
+async def list_event_types():
+    """F04: Lista todos os tipos de eventos com efeitos."""
+    return {"event_types": {k: {"name": v["name"], "duration": v["duration"],
+        "hp_delta": v.get("hp_delta", 0)} for k, v in world.DYNAMIC_EVENTS.items()}}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F07 — Reputação Social e Alianças
+# ═══════════════════════════════════════════════════════════════════════
+
+class AllianceRequest(BaseModel):
+    agent_b_name: str
+
+
+@app.post("/agents/{agent_id}/alliances")
+@app.post("/agents/{agent_id}/alliance")
+async def form_alliance(agent_id: str, req: AllianceRequest):
+    """F07: Forma aliança entre agente e outro (por nome)."""
+    result = world.form_alliance(agent_id, req.agent_b_name)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    await manager.broadcast({"type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🤝 Aliança: {result.get('alliance')}"}]})
+    return result
+
+
+@app.delete("/agents/{agent_id}/alliance")
+async def break_alliance_endpoint(agent_id: str, betrayal: bool = False):
+    """F07: Quebra aliança. betrayal=true aplica penalidade de reputação."""
+    result = world.break_alliance(agent_id, betrayal=betrayal)
+    if "error" in result:
+        raise HTTPException(404, result["error"])
+    await manager.broadcast({"type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": "💔 Aliança quebrada"}]})
+    return result
+
+
+@app.post("/agents/{agent_id}/betray")
+async def betray_alliance_endpoint(agent_id: str):
+    """F07: Rota de traição explícita (equivalente a quebrar aliança com penalidade)."""
+    return await break_alliance_endpoint(agent_id, betrayal=True)
+
+
+@app.get("/agents/{agent_id}/reputation")
+async def get_agent_reputation(agent_id: str):
+    """F07: Retorna dados de reputação social do agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agente não encontrado")
+    return {"agent_id": agent.id, "name": agent.name, "alliance": agent.alliance,
+            "reputation_score": round(agent.reputation_score, 2),
+            "betrayals": agent.betrayals, "promises": agent.promises}
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# F08 — Missões Individuais
+# ═══════════════════════════════════════════════════════════════════════
+
+@app.get("/missions/templates")
+@app.get("/missions/catalog")
+async def get_mission_catalog():
+    """F08: Retorna o catálogo completo de missões."""
+    return {"count": len(world.mission_catalog), "missions": world.mission_catalog}
+
+
+@app.post("/missions/assign", dependencies=[Depends(verify_admin_token)])
+async def assign_missions_endpoint():
+    """F08: Atribui missões aleatórias a todos os agentes. Requer X-Admin-Token."""
+    world.assign_missions()
+    return {"status": "assigned",
+            "assignments": [{"agent": a.name, "mission_id": a.mission_id} for a in world.agents]}
+
+
+@app.get("/agents/{agent_id}/mission")
+async def get_agent_mission(agent_id: str):
+    """F08: Retorna o progresso de missão de um agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agente não encontrado")
+    mission = next((m for m in world.mission_catalog if m["id"] == agent.mission_id), None)
+    return {"agent_id": agent.id, "name": agent.name, "mission_id": agent.mission_id,
+            "mission": mission, "progress": agent.mission_state.get("progress", 0),
+            "target": mission["target"] if mission else None,
+            "completed": agent.mission_completed_tick is not None,
+            "completed_tick": agent.mission_completed_tick,
+            "bonus_score": agent.mission_bonus_score}
+
+
+@app.get("/missions/progress")
+async def get_all_missions_progress():
+    """F08: Retorna o progresso de missões de todos os agentes."""
+    return {"ticks": world.ticks, "missions": [
+        {"agent": a.name, "mission_id": a.mission_id,
+         "progress": a.mission_state.get("progress", 0),
+         "completed": a.mission_completed_tick is not None,
+         "bonus_score": a.mission_bonus_score}
+        for a in world.agents]}
+
+# ═══════════════════════════════════════════════════════════════════════
+# F12 — Modo Gincana
+# ═══════════════════════════════════════════════════════════════════════
+
+class GincanaStartRequest(BaseModel):
+    max_ticks: int = 400
+
+
+@app.post("/modes/gincana/start", dependencies=[Depends(verify_admin_token)])
+@app.post("/gincana/start", dependencies=[Depends(verify_admin_token)])
+async def gincana_start(req: GincanaStartRequest = GincanaStartRequest()):
+    """F12: Inicia a Gincana no mundo atual. Requer X-Admin-Token e game_mode=gincana."""
+    if world.game_mode != "gincana":
+        raise HTTPException(400, "Mundo não está no modo gincana. Faça /reset com game_mode=gincana.")
+    world.gincana.start(max_ticks=req.max_ticks)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏁 Gincana iniciada! Máx: {req.max_ticks} ticks"}]
+    })
+    return {"status": "started", "max_ticks": req.max_ticks, "gincana": world.gincana.get_state()}
+
+
+@app.post("/gincana/stop", dependencies=[Depends(verify_admin_token)])
+async def gincana_stop():
+    """F12: Encerra a Gincana e retorna resultado final. Requer X-Admin-Token."""
+    result = world.gincana.stop()
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏆 Gincana encerrada! Vencedor: {result.get('winner_name')}"}]
+    })
+    return {"status": "stopped", "result": result}
+
+
+@app.get("/gincana/state")
+async def gincana_state():
+    """F12: Retorna o estado atual da Gincana (placar, checkpoints, artefato)."""
+    return {
+        "game_mode": world.game_mode,
+        "ticks": world.ticks,
+        "gincana": world.gincana.get_state(),
+    }
+
+
+@app.get("/modes/gincana/templates")
+@app.get("/gincana/templates")
+async def gincana_templates():
+    """F12: Retorna os templates e configurações disponíveis para Gincana."""
+    return {
+        "templates": [
+            {"id": "classic", "name": "Gincana Clássica", "max_ticks": 400,
+             "description": "4 checkpoints + artefato central. 400 ticks."},
+            {"id": "sprint", "name": "Sprint", "max_ticks": 150,
+             "description": "Corrida rápida por checkpoints. 150 ticks."},
+            {"id": "marathon", "name": "Maratona", "max_ticks": 800,
+             "description": "Longa batalha por artefatos. 800 ticks."},
+        ],
+        "scoring": {
+            "checkpoint": 5,
+            "delivery": 20,
+        }
+    }
+
+# ═══════════════════════════════════════════════════════════════════════
+# F13-F16 — Modo Warfare
+# ═══════════════════════════════════════════════════════════════════════
+
+class WarfareStartRequest(BaseModel):
+    max_ticks: int = 600
+
+
+class ThrowRequest(BaseModel):
+    attacker_id: str
+    target_x: int
+    target_y: int
+
+
+class TeamRolesRequest(BaseModel):
+    roles: dict[str, str] = {}
+
+
+class ZoneConfigRequest(BaseModel):
+    x: Optional[int] = None
+    y: Optional[int] = None
+    name: Optional[str] = None
+
+
+@app.post("/modes/warfare/start", dependencies=[Depends(verify_admin_token)])
+@app.post("/warfare/start", dependencies=[Depends(verify_admin_token)])
+async def warfare_start(req: WarfareStartRequest = WarfareStartRequest()):
+    """F13: Inicia o Warfare. Requer X-Admin-Token e game_mode=warfare."""
+    if world.game_mode != "warfare":
+        raise HTTPException(400, "Mundo não está no modo warfare. Faça /reset com game_mode=warfare.")
+    world.warfare.start(max_ticks=req.max_ticks)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"⚔️ Warfare iniciado! Máx: {req.max_ticks} ticks"}]
+    })
+    return {"status": "started", "max_ticks": req.max_ticks, "warfare": world.warfare.get_state()}
+
+
+@app.post("/warfare/stop", dependencies=[Depends(verify_admin_token)])
+async def warfare_stop():
+    """F13: Encerra o Warfare. Requer X-Admin-Token."""
+    result = world.warfare.stop()
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏴 Warfare encerrado! Facção {result.get('winner_faction', '?').upper()} vence!"}]
+    })
+    return {"status": "stopped", "result": result}
+
+
+@app.get("/modes/warfare/state")
+@app.get("/warfare/state")
+async def warfare_state():
+    """F13-F16: Retorna estado completo do Warfare (facções, território, placar)."""
+    return {
+        "game_mode": world.game_mode,
+        "ticks": world.ticks,
+        "warfare": world.warfare.get_state(),
+    }
+
+
+@app.post("/actions/throw")
+@app.post("/warfare/throw")
+async def warfare_throw(req: ThrowRequest):
+    """F14: Arremessa uma pedra de um agente para uma posição alvo."""
+    events = []
+    result = world.warfare.throw_stone(req.attacker_id, req.target_x, req.target_y, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({
+            "type": "update", "data": world.get_state(),
+            "events": events
+        })
+    return result
+
+
+@app.get("/combat/config")
+async def combat_config():
+    """F14: Configuração de combate por arremesso."""
+    from runtime.warfare_engine import THROW_DAMAGE, THROW_RANGE, THROW_AOE_RADIUS, ROLE_BONUSES
+    return {
+        "throw": {
+            "damage": THROW_DAMAGE,
+            "range": THROW_RANGE,
+            "aoe_radius": THROW_AOE_RADIUS,
+        },
+        "roles": ROLE_BONUSES,
+        "supported_actions": ["throw_stone"],
+    }
+
+
+@app.get("/warfare/roles")
+async def warfare_roles():
+    """F15: Retorna os papéis táticos atribuídos a cada agente."""
+    return {
+        "roles": {
+            agent.id: {
+                "name": agent.name,
+                "role": world.warfare.agent_roles.get(agent.id),
+                "faction": world.warfare.agent_factions.get(agent.id),
+            }
+            for agent in world.agents
+        },
+        "role_bonuses": world.warfare.ROLE_BONUSES if hasattr(world.warfare, "ROLE_BONUSES") else {},
+    }
+
+
+@app.get("/warfare/territory")
+async def warfare_territory():
+    """F16: Retorna o estado atual do controle de território."""
+    zone = world.entities.get("control_zone_center")
+    return {
+        "territory_holder": world.warfare.territory_holder,
+        "contest_ticks": world.warfare.territory_contest_ticks,
+        "faction_scores": world.warfare.faction_scores,
+        "zone": zone,
+    }
+
+
+@app.post("/teams/{team_id}/roles")
+async def set_team_roles(team_id: str, req: TeamRolesRequest):
+    """F15: Configura papéis táticos de um time (alpha/beta)."""
+    from runtime.warfare_engine import ROLES
+
+    if team_id not in ("alpha", "beta"):
+        raise HTTPException(400, "team_id deve ser 'alpha' ou 'beta'")
+
+    team_agents = [a for a in world.agents if world.warfare.agent_factions.get(a.id) == team_id]
+    if not team_agents:
+        raise HTTPException(400, f"Nenhum agente da facção '{team_id}'. Inicie o modo warfare primeiro.")
+
+    if req.roles:
+        for agent_id, role in req.roles.items():
+            if role not in ROLES:
+                raise HTTPException(400, f"Role inválido '{role}'. Válidos: {ROLES}")
+            if world.warfare.agent_factions.get(agent_id) != team_id:
+                raise HTTPException(400, f"Agente {agent_id} não pertence ao time '{team_id}'")
+            world.warfare.agent_roles[agent_id] = role
+            agent = next((a for a in world.agents if a.id == agent_id), None)
+            if agent:
+                agent.role = role  # type: ignore[attr-defined]
+    else:
+        # Sem payload explícito, apenas reequilibra papéis em round-robin.
+        for idx, agent in enumerate(team_agents):
+            role = ROLES[idx % len(ROLES)]
+            world.warfare.agent_roles[agent.id] = role
+            agent.role = role  # type: ignore[attr-defined]
+
+    return await get_team_roles(team_id)
+
+
+@app.get("/teams/{team_id}/roles")
+async def get_team_roles(team_id: str):
+    """F15: Retorna papéis táticos de todos os agentes de um time."""
+    if team_id not in ("alpha", "beta"):
+        raise HTTPException(400, "team_id deve ser 'alpha' ou 'beta'")
+
+    roles = {}
+    for agent in world.agents:
+        if world.warfare.agent_factions.get(agent.id) == team_id:
+            roles[agent.id] = {
+                "name": agent.name,
+                "role": world.warfare.agent_roles.get(agent.id),
+            }
+    return {"team_id": team_id, "roles": roles}
+
+
+@app.post("/zones/config")
+async def configure_zone(req: ZoneConfigRequest):
+    """F16: Atualiza configuração da zona central de controle."""
+    zone = world.entities.get("control_zone_center")
+    if not zone:
+        raise HTTPException(404, "Zona de controle central não encontrada")
+
+    if req.x is not None:
+        if not (0 <= req.x < world.size):
+            raise HTTPException(400, f"x fora do mapa (0..{world.size - 1})")
+        zone["x"] = req.x
+    if req.y is not None:
+        if not (0 <= req.y < world.size):
+            raise HTTPException(400, f"y fora do mapa (0..{world.size - 1})")
+        zone["y"] = req.y
+    if req.name:
+        zone["name"] = req.name
+
+    await manager.broadcast({
+        "type": "update",
+        "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": "📍 Zona de controle atualizada."}],
+    })
+    return {"status": "updated", "zone": zone}
+
+
+@app.get("/zones/state")
+async def zones_state():
+    """F16: Alias de estado de território para consumo por zona."""
+    return await warfare_territory()
+
+# ═══════════════════════════════════════════════════════════════════════
+# F10+F17+F18+F19 — Economia, Crafting e Contratos
+# ═══════════════════════════════════════════════════════════════════════
+
+class CraftRequest(BaseModel):
+    agent_id: str
+    recipe: str
+
+class BuildRequest(BaseModel):
+    agent_id: str
+    structure_type: str
+    x: int
+    y: int
+
+class TradeRequest(BaseModel):
+    seller_id: str
+    buyer_id: str
+    item: str
+    price: float
+
+class MarketOrderRequest(BaseModel):
+    agent_id: str
+    item: str
+    qty: int = 1
+
+class ContractPostRequest(BaseModel):
+    requester_id: str
+    item: str
+    qty: int
+    reward: float
+
+class ContractFulfillRequest(BaseModel):
+    agent_id: str
+    contract_id: int
+
+
+class ContractFulfillPathRequest(BaseModel):
+    agent_id: str
+
+
+@app.post("/modes/economy/start", dependencies=[Depends(verify_admin_token)])
+@app.post("/economy/start", dependencies=[Depends(verify_admin_token)])
+async def economy_start():
+    """F17: Inicializa a economia — dá moedas iniciais a todos os agentes. Requer X-Admin-Token."""
+    world.economy.start()
+    initial_coins = next(iter(world.economy.coins.values()), 0)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"💰 Economia iniciada! Cada agente recebeu {initial_coins} moedas"}]
+    })
+    return {"status": "started", "economy": world.economy.get_state()}
+
+
+@app.get("/modes/economy/state")
+@app.get("/economy/state")
+async def economy_state():
+    """F17-F19: Retorna estado completo da economia."""
+    return {"ticks": world.ticks, "economy": world.economy.get_state()}
+
+
+@app.get("/recipes")
+@app.get("/economy/recipes")
+async def economy_recipes():
+    """F10: Lista todas as receitas de crafting disponíveis."""
+    from runtime.economy_engine import RECIPES
+    return {"recipes": RECIPES}
+
+
+@app.post("/craft")
+@app.post("/economy/craft")
+async def economy_craft(req: CraftRequest):
+    """F10: Agente crafta um item a partir de ingredientes no inventário."""
+    events = []
+    result = world.economy.craft(req.agent_id, req.recipe, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/build")
+@app.post("/economy/build")
+async def economy_build(req: BuildRequest):
+    """F10: Agente constrói uma estrutura no mapa."""
+    events = []
+    result = world.economy.build(req.agent_id, req.structure_type, req.x, req.y, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/economy/trade")
+async def economy_trade(req: TradeRequest):
+    """F17: Transfere item entre dois agentes por moedas."""
+    events = []
+    result = world.economy.trade(req.seller_id, req.buyer_id, req.item, req.price, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/economy/coins")
+async def economy_coins():
+    """F17: Retorna saldo de moedas de todos os agentes."""
+    return {
+        "coins": {
+            agent.name: world.economy.coins.get(agent.id, 0)
+            for agent in world.agents
+        }
+    }
+
+
+@app.get("/economy/market")
+async def economy_market():
+    """F18: Retorna preços e estoques atuais do mercado central."""
+    return {
+        "prices": world.economy.market_prices,
+        "stock": world.economy.market_stock,
+        "tx_count": len(world.economy.market_tx_log),
+    }
+
+
+@app.get("/market/prices")
+async def market_prices():
+    """F18: Alias para leitura dos preços do mercado central."""
+    state = await economy_market()
+    return {"prices": state["prices"], "stock": state["stock"], "tx_count": state["tx_count"]}
+
+
+@app.post("/market/recalculate")
+async def market_recalculate():
+    """F18: Força recálculo dos preços de mercado pela oferta/demanda atual."""
+    snapshot = world.economy.recalculate_market(reason="api_manual_recalculate")
+    await manager.broadcast({
+        "type": "update",
+        "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": "📈 Mercado recalculado manualmente."}],
+    })
+    return snapshot
+
+
+@app.post("/market/buy")
+@app.post("/economy/market/buy")
+async def economy_market_buy(req: MarketOrderRequest):
+    """F18: Agente compra item do mercado central."""
+    events = []
+    result = world.economy.market_buy(req.agent_id, req.item, req.qty, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/market/sell")
+@app.post("/economy/market/sell")
+async def economy_market_sell(req: MarketOrderRequest):
+    """F18: Agente vende item ao mercado central."""
+    events = []
+    result = world.economy.market_sell(req.agent_id, req.item, req.qty, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/contracts")
+@app.get("/economy/contracts")
+async def economy_contracts():
+    """F19: Lista todos os contratos (abertos e cumpridos)."""
+    return {
+        "open": [c for c in world.economy.contracts if c["status"] == "open"],
+        "fulfilled": [c for c in world.economy.contracts if c["status"] == "fulfilled"],
+        "total": len(world.economy.contracts),
+    }
+
+
+@app.post("/contracts")
+@app.post("/economy/contracts")
+async def economy_post_contract(req: ContractPostRequest):
+    """F19: Publica um contrato de entrega de item."""
+    result = world.economy.post_contract(req.requester_id, req.item, req.qty, req.reward)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"📜 Novo contrato #{result['id']}: {req.qty}x {req.item} por {req.reward} moedas"}]
+    })
+    return result
+
+
+@app.post("/economy/contracts/fulfill")
+async def economy_fulfill_contract(req: ContractFulfillRequest):
+    """F19: Agente cumpre um contrato e recebe recompensa."""
+    events = []
+    result = world.economy.fulfill_contract(req.agent_id, req.contract_id, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/contracts/{contract_id}/fulfill")
+async def economy_fulfill_contract_by_path(contract_id: int, req: ContractFulfillPathRequest):
+    """F19: Alias RESTful para cumprimento de contrato."""
+    events = []
+    result = world.economy.fulfill_contract(req.agent_id, contract_id, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/economy/reputation")
+async def economy_reputation():
+    """F19: Retorna a reputação mercantil de cada agente."""
+    return {
+        "reputation": {
+            agent.name: world.economy.trade_reputation.get(agent.id, 0.0)
+            for agent in world.agents
+        }
+    }
+
+
+@app.get("/agents/{agent_id}/wallet")
+async def agent_wallet(agent_id: str):
+    """F17: Retorna saldo de moedas e reputação mercantil do agente."""
+    agent = next((a for a in world.agents if a.id == agent_id), None)
+    if not agent:
+        raise HTTPException(404, "Agente não encontrado")
+    return {
+        "agent_id": agent_id,
+        "name": agent.name,
+        "coins": world.economy.coins.get(agent_id, 0),
+        "trade_reputation": round(world.economy.trade_reputation.get(agent_id, 0), 2),
+    }
+
+# ═══════════════════════════════════════════════════════════════════════
+# F20 — Guerra de Gangues (modo híbrido warfare + economy)
+# ═══════════════════════════════════════════════════════════════════════
+
+class GangWarStartRequest(BaseModel):
+    max_ticks: int = 500
+
+
+class SabotageRequest(BaseModel):
+    agent_id: str
+    target_gang: str
+
+
+class DepotRequest(BaseModel):
+    agent_id: str
+    item: str
+    qty: int = 1
+
+
+class BMBuyRequest(BaseModel):
+    agent_id: str
+    item: str
+    qty: int = 1
+
+
+@app.post("/gangwar/start", dependencies=[Depends(verify_admin_token)])
+async def gangwar_start(req: GangWarStartRequest = GangWarStartRequest()):
+    """F20: Inicia a Guerra de Gangues. Requer X-Admin-Token e game_mode gangwar/hybrid."""
+    if world.game_mode not in ("gangwar", "hybrid"):
+        raise HTTPException(
+            400,
+            "Mundo não está no modo gangwar/hybrid. Faça /reset com game_mode=gangwar ou hybrid.",
+        )
+    world.gangwar.start(max_ticks=req.max_ticks)
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏴‍☠️ Guerra de Gangues iniciada! Máx: {req.max_ticks} ticks"}]
+    })
+    return {"status": "started", "gangwar": world.gangwar.get_state()}
+
+
+@app.post("/modes/hybrid/start", dependencies=[Depends(verify_admin_token)])
+async def hybrid_mode_start(req: GangWarStartRequest = GangWarStartRequest()):
+    """F20: Alias da feature para iniciar GangWar quando o mundo está em modo hybrid."""
+    if world.game_mode != "hybrid":
+        raise HTTPException(400, "Mundo não está no modo hybrid. Faça /reset com game_mode=hybrid.")
+    return await gangwar_start(req)
+
+
+@app.post("/gangwar/stop", dependencies=[Depends(verify_admin_token)])
+async def gangwar_stop():
+    """F20: Encerra a Guerra de Gangues."""
+    result = world.gangwar.stop()
+    await manager.broadcast({
+        "type": "update", "data": world.get_state(),
+        "events": [{"action": "busy", "event_msg": f"🏆 Gangue {result.get('winner_gang', '?').upper()} venceu a guerra!"}]
+    })
+    return {"status": "stopped", "result": result}
+
+
+@app.post("/modes/hybrid/stop", dependencies=[Depends(verify_admin_token)])
+async def hybrid_mode_stop():
+    """F20: Alias da feature para encerrar GangWar no modo hybrid."""
+    if world.game_mode != "hybrid":
+        raise HTTPException(400, "Mundo não está no modo hybrid. Faça /reset com game_mode=hybrid.")
+    return await gangwar_stop()
+
+
+@app.get("/gangwar/state")
+async def gangwar_state():
+    """F20: Retorna o estado completo da Guerra de Gangues."""
+    return {"game_mode": world.game_mode, "ticks": world.ticks, "gangwar": world.gangwar.get_state()}
+
+
+@app.get("/modes/hybrid/state")
+async def hybrid_mode_state():
+    """F20: Alias da feature para leitura de estado do modo hybrid."""
+    if world.game_mode != "hybrid":
+        raise HTTPException(400, "Mundo não está no modo hybrid. Faça /reset com game_mode=hybrid.")
+    return await gangwar_state()
+
+
+@app.post("/gangwar/sabotage")
+async def gangwar_sabotage(req: SabotageRequest):
+    """F20: Agente sabota o depósito da gangue inimiga."""
+    events = []
+    result = world.gangwar.sabotage_depot(req.agent_id, req.target_gang, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.post("/gangwar/depot/deposit")
+async def gangwar_depot_deposit(req: DepotRequest):
+    """F20: Agente deposita item no depósito da própria gangue."""
+    result = world.gangwar.deposit_item(req.agent_id, req.item, req.qty)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@app.post("/gangwar/depot/withdraw")
+async def gangwar_depot_withdraw(req: DepotRequest):
+    """F20: Agente retira item do depósito da própria gangue."""
+    result = world.gangwar.withdraw_item(req.agent_id, req.item, req.qty)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    return result
+
+
+@app.get("/gangwar/depot/{gang}")
+async def gangwar_depot_state(gang: str):
+    """F20: Retorna estado do depósito de uma gangue."""
+    if gang not in ["alpha", "beta"]:
+        raise HTTPException(400, "Gangue deve ser 'alpha' ou 'beta'")
+    locked_until = world.gangwar.depot_locked_until.get(gang, 0)
+    return {
+        "gang": gang,
+        "depot": world.gangwar.depots.get(gang, {}),
+        "locked": locked_until > world.ticks,
+        "locked_until_tick": locked_until,
+    }
+
+
+@app.post("/gangwar/black-market/buy")
+async def gangwar_bm_buy(req: BMBuyRequest):
+    """F20: Agente compra item no mercado negro (preços voláteis, sem rastreio)."""
+    events = []
+    result = world.gangwar.bm_buy(req.agent_id, req.item, req.qty, events)
+    if "error" in result:
+        raise HTTPException(400, result["error"])
+    if events:
+        await manager.broadcast({"type": "update", "data": world.get_state(), "events": events})
+    return result
+
+
+@app.get("/gangwar/black-market/prices")
+async def gangwar_bm_prices():
+    """F20: Retorna preços e estoque atual do mercado negro."""
+    return {
+        "prices": world.gangwar.bm_prices,
+        "stock": world.gangwar.bm_stock,
+        "items": world.gangwar.BLACK_MARKET_ITEMS if hasattr(world.gangwar, 'BLACK_MARKET_ITEMS') else list(world.gangwar.bm_prices),
+    }
+
+# ── F11 — Webhooks: Histórico e Estatísticas ─────────────────────────────────
+
+@app.get("/webhooks/admin/history")
+async def webhooks_history(
+    webhook_id: Optional[str] = None,
+    limit: int = 50,
+    _: None = Depends(verify_admin_token)
+):
+    """F11: Retorna histórico de entregas de webhooks (admin). Filtrável por webhook_id."""
+    history = webhook_manager.get_delivery_history(webhook_id=webhook_id, limit=limit)
+    return {"count": len(history), "deliveries": history}
+
+
+@app.get("/webhooks/admin/stats")
+async def webhooks_stats(_: None = Depends(verify_admin_token)):
+    """F11: Retorna estatísticas gerais de disparo de webhooks (admin)."""
+    return webhook_manager.get_delivery_stats()
+
+
+@app.get("/webhooks/admin/event-types")
+async def webhooks_events():
+    """F11: Lista todos os tipos de evento suportados para registro de webhooks."""
+    from storage.webhook_manager import VALID_EVENTS
+    return {"valid_events": sorted(VALID_EVENTS)}

@@ -9,14 +9,23 @@ from typing import Optional
 
 # Ações válidas no world
 VALID_ACTIONS = {
+    # Base (survival)
     "move", "move_to", "attack", "speak", "wait",
     "eat", "drink", "gather", "fill_bottle", "pickup_body", "bury",
+    # Warfare (F13-F16)
+    "throw", "capture_zone",
+    # Economy (F17-F19)
+    "trade", "buy", "sell", "craft",
+    # GangWar/Hybrid (F20)
+    "sabotage", "supply",
 }
 
 # Intenções de alto nível para benchmark
 VALID_INTENTS = {
     "survive", "attack", "befriend", "explore",
     "gather_resources", "heal", "help", "hide",
+    # Mode-specific
+    "conquer", "defend", "trade", "cooperate", "sabotage",
 }
 
 
@@ -106,15 +115,28 @@ class ActionDecision(BaseModel):
             return cls()  # fallback: wait
 
     @classmethod
-    def get_json_schema_prompt(cls) -> str:
+    def get_json_schema_prompt(cls, game_mode: str = "survival") -> str:
         """Retorna instruções de schema para inserir no system prompt da IA."""
-        return """Retorne APENAS um objeto JSON válido com exatamente estes campos:
-{
+        base_actions = "move | move_to | attack | speak | wait | eat | drink | gather | fill_bottle | pickup_body | bury"
+        mode_actions = ""
+        if game_mode == "warfare":
+            mode_actions = " | throw | capture_zone"
+        elif game_mode == "economy":
+            mode_actions = " | trade | buy | sell | craft"
+        elif game_mode in ("gangwar", "hybrid"):
+            mode_actions = " | throw | sabotage | supply | buy | sell"
+        elif game_mode == "gincana":
+            mode_actions = ""  # ações base servem (move_to checkpoints)
+
+        all_actions = base_actions + mode_actions
+
+        return f"""Retorne APENAS um objeto JSON válido com exatamente estes campos:
+{{
   "thought": "seu raciocínio interno (string, max 500 chars)",
   "speak": "o que você diz em voz alta (string, pode ser vazio)",
-  "action": "uma das ações: move | move_to | attack | speak | wait | eat | drink | gather | fill_bottle | pickup_body | bury",
+  "action": "uma das ações: {all_actions}",
   "target_name": "nome do alvo se aplicável (string, pode ser vazio)",
-  "intent": "sua intenção: survive | attack | befriend | explore | gather_resources | heal | help | hide",
-  "params": {}
-}
+  "intent": "sua intenção: survive | attack | befriend | explore | gather_resources | heal | help | hide | conquer | defend | trade | cooperate | sabotage",
+  "params": {{}}
+}}
 NÃO inclua markdown, explicações ou texto fora do JSON."""

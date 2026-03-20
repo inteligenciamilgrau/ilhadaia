@@ -5,13 +5,31 @@ import collections
 import os
 import asyncio
 from typing import Optional, List, Dict, Any
+from runtime.gincana_engine import GincanaEngine
+from runtime.warfare_engine import WarfareEngine
+from runtime.economy_engine import EconomyEngine
+from runtime.gangwar_engine import GangWarEngine
 
 logger = logging.getLogger("BBB_IA")
 
 class World:
-    def __init__(self, size=20):
+    # Modos de jogo válidos e tamanho recomendado por modo
+    MODE_SIZES = {
+        "survival": 32,
+        "gincana":  32,
+        "warfare":  40,
+        "economy":  36,
+        "gangwar":  40,
+        "hybrid":   44,
+    }
+    VALID_MODES = set(MODE_SIZES.keys())
+
+    def __init__(self, size=None, game_mode: str = "survival"):
+        # Modo de jogo
+        self.game_mode: str = game_mode if game_mode in self.VALID_MODES else "survival"
         # Initialize world state with grid size
-        self.size = size
+        self.size = self._resolve_world_size(size)
+        self._configure_landmarks()
         self.ticks = 0
         self.started = False # T14: Game only ticks when started
         self.game_over = False
@@ -19,7 +37,7 @@ class World:
         self.entities: Dict[str, Any] = {} # Map of id -> entity (agents, items)
         self.system_agent_overrides: Dict[str, str] = {} # sys_id -> profile_id
         
-        # Initialize map with basic resources (wood, stone)
+        # Initialize map with basic resources
         self._init_map()
         
         # the agents list to tick
@@ -54,11 +72,90 @@ class World:
         self.session_id: Optional[str] = None
         self.tournament_end_tick: Optional[int] = None
         self.active_tournament_id: Optional[str] = None
-        
+
+        # ── F04 — Eventos Dinâmicos da Ilha ──────────────────────────────────
+        self.active_event: Optional[dict] = None    # {type, message, end_tick, effects}
+        self.event_end_tick: int = 0
+        self.event_history: List[dict] = []         # Histórico de eventos da sessão
+        # Probabilidade por tick de disparar evento (ajustável)
+        self.event_chance: float = 0.005            # ~0.5% por tick = ~1 evento a cada 200 ticks
+
+        # ── F07 — Reputação Social ────────────────────────────────────────────
+        # Rastreamento global de alianças para evitar duplicatas e decidir bônus
+        self.alliance_bonus_hp_per_tick: float = 0.15  # HP extra por tick para aliados próximos
+        self.betrayal_penalty: float = -20.0           # Delta de reputação por traição
+
+        # ── F08 — Missões Individuais ─────────────────────────────────────────
+        self.mission_catalog: List[dict] = []       # Preenchido em _init_missions()
+        self._init_missions()
+
+        # ── F12 — Modo Gincana ────────────────────────────────────────────────
+        self.gincana: GincanaEngine = GincanaEngine(self)
+
+        # ── F13-F16 — Modo Warfare ────────────────────────────────────────────
+        self.warfare: WarfareEngine = WarfareEngine(self)
+
+        # ── F10+F17+F18+F19 — Economia ───────────────────────────────────────
+        self.economy: EconomyEngine = EconomyEngine(self)
+
+        # ── F20 — Guerra de Gangues ──────────────────────────────────────────
+        self.gangwar: GangWarEngine = GangWarEngine(self)
+
         # Day/Night Cycle: 120 ticks total (70 day + 10 dusk + 30 night + 10 dawn)
         self.DAY_CYCLE = 120
         self._was_night = False  # Track night transitions for zombie conversion
         self._load_history()
+
+
+    def _resolve_world_size(self, size) -> int:
+        if size is None:
+            # Se tamanho não especificado, usar tamanho recomendado pelo modo
+            env_size = os.getenv("WORLD_SIZE", "").strip()
+            if env_size:
+                try:
+                    size = int(env_size)
+                except ValueError:
+                    logger.warning("Invalid WORLD_SIZE=%s. Using mode default.", env_size)
+                    size = self.MODE_SIZES.get(self.game_mode, 32)
+            else:
+                size = self.MODE_SIZES.get(self.game_mode, 32)
+        try:
+            parsed = int(size)
+        except (TypeError, ValueError):
+            parsed = 32
+        # Keep minimum safe size to preserve pathing landmarks and home spacing.
+        return max(20, parsed)
+
+    def _configure_landmarks(self) -> None:
+        margin = max(2, min(4, self.size // 8))
+        opposite = self.size - margin - 1
+        if opposite <= margin:
+            margin = 1
+            opposite = self.size - 2
+
+        self.house_positions = [
+            (margin, margin),
+            (opposite, opposite),
+            (opposite, margin),
+            (margin, opposite),
+        ]
+        self.house_by_name = {
+            "João": self.house_positions[0],
+            "Maria": self.house_positions[1],
+            "Zeca": self.house_positions[2],
+            "Elly": self.house_positions[3],
+        }
+
+        center = self.size // 2
+        self.pond_center_x = center
+        self.pond_center_y = center
+        self.pond_radius = max(3, self.size // 8)
+        self.pond_radius_sq = self.pond_radius ** 2
+        self.tree_min_distance_sq = (self.pond_radius + 2) ** 2
+
+        self.cemetery_x = max(3, self.size - 5)
+        self.cemetery_y = max(3, self.size // 4)
+        self.house_shelter_radius = 2
 
     def set_ai_decider(self, ai_decider) -> None:
         """Injecta um orquestrador de decisão (ex.: Thinker) para o loop de IA."""
@@ -113,42 +210,451 @@ class World:
             logger.error(f"Error saving history/settings: {e}")
 
     def _init_map(self):
-        # A simple grid representation could be kept here, 
-        # or just relying on entities with x,y coords.
-        logger.info(f"Initialized world map {self.size}x{self.size}")
+        logger.info(f"Initialized world map {self.size}x{self.size} (mode={self.game_mode})")
+
+        door_tiles = set()
+        for (hx, hy), name in zip(self.house_positions, ["João", "Maria", "Zeca", "Elly"]):
+            if name == "João":
+                door = (hx, hy + 1)
+            elif name == "Maria":
+                door = (hx + 1, hy)
+            elif name == "Zeca":
+                door = (hx, hy - 1)
+            else:
+                door = (hx - 1, hy)
+            if 0 <= door[0] < self.size and 0 <= door[1] < self.size:
+                door_tiles.add(door)
+
         for x in range(self.size):
             for y in range(self.size):
-                # Central area for the pond (circle approx radius 2.5 around 10,10)
-                dist_to_center = (x - 10)**2 + (y - 10)**2
-                if dist_to_center <= 7:
-                    eid = f"water_{x}_{y}"
-                    self.add_entity(eid, {"type": "water", "x": x, "y": y})
+                dist_to_center = (x - self.pond_center_x) ** 2 + (y - self.pond_center_y) ** 2
+                if dist_to_center <= self.pond_radius_sq:
+                    self.add_entity(f"water_{x}_{y}", {"type": "water", "x": x, "y": y})
                     continue
 
-                # Skip front of house doors
-                # Joao (2,2) door at (2,3)
-                # Maria (17,17) door at (18,17)
-                # Zeca (17,2) door at (17,1)
-                # Ana (2,17) door at (1,17)
-                if (x == 2 and y == 3) or (x == 18 and y == 17) or (x == 17 and y == 1) or (x == 1 and y == 17):
+                if (x, y) in door_tiles:
                     continue
 
-                # 2% chance of stone (reduced)
                 if random.random() < 0.02:
                     self.add_entity(f"stone_{x}_{y}", {"type": "stone", "x": x, "y": y})
-                # 1% chance of tree (reduced) — NOT within 2 tiles of the lake!
-                elif random.random() < 0.01 and dist_to_center > 20:
+                elif random.random() < 0.01 and dist_to_center > self.tree_min_distance_sq:
                     self.add_entity(f"tree_{x}_{y}", {"type": "tree", "x": x, "y": y, "fruit_stage": 3})
-        # Fixed landmarks
-        self.add_entity("house_joao", {"type": "house", "x": 2, "y": 2, "name": "Casa do João"})
-        self.add_entity("house_maria", {"type": "house", "x": 17, "y": 17, "name": "Casa da Maria"})
-        self.add_entity("house_zeca", {"type": "house", "x": 17, "y": 2, "name": "Casa do Zeca"})
-        self.add_entity("house_elly", {"type": "house", "x": 2, "y": 17, "name": "Casa da Elly"})
-        self.add_entity("cemetery_area", {"type": "cemetery", "x": 15, "y": 5, "name": "Cemitério da Ilha"})
+
+        self.add_entity("house_joao", {"type": "house", "x": self.house_positions[0][0], "y": self.house_positions[0][1], "name": "Casa do João"})
+        self.add_entity("house_maria", {"type": "house", "x": self.house_positions[1][0], "y": self.house_positions[1][1], "name": "Casa da Maria"})
+        self.add_entity("house_zeca", {"type": "house", "x": self.house_positions[2][0], "y": self.house_positions[2][1], "name": "Casa do Zeca"})
+        self.add_entity("house_elly", {"type": "house", "x": self.house_positions[3][0], "y": self.house_positions[3][1], "name": "Casa da Elly"})
+        self.add_entity("cemetery_area", {"type": "cemetery", "x": self.cemetery_x, "y": self.cemetery_y, "name": "Cemitério da Ilha"})
+
+        # Spawnar objetos específicos do modo de jogo
+        self._spawn_mode_objects()
+
+    def _get_mode_spawn_objects(self) -> list:
+        """Retorna lista de objetos extras a spawnar com base no game_mode."""
+        margin = max(2, min(4, self.size // 8))
+        sz = self.size
+        mode = self.game_mode
+        objects = []
+
+        if mode in ("gincana",):
+            # Checkpoints em 4 cantos mais internos
+            positions_cp = [
+                (sz // 4, sz // 4),
+                (sz * 3 // 4, sz // 4),
+                (sz // 4, sz * 3 // 4),
+                (sz * 3 // 4, sz * 3 // 4),
+            ]
+            for i, (cx, cy) in enumerate(positions_cp):
+                objects.append({"id": f"checkpoint_{i}", "type": "checkpoint", "x": cx, "y": cy, "name": f"Checkpoint {i+1}", "captured": False})
+            objects.append({"id": "artifact_main", "type": "artifact", "x": sz // 2 + 3, "y": sz // 2 - 3, "name": "Artefato Principal", "collected": False})
+            objects.append({"id": "delivery_zone", "type": "delivery_marker", "x": margin, "y": sz - margin - 1, "name": "Zona de Entrega"})
+
+        elif mode in ("warfare",):
+            # Bases de time
+            objects.append({"id": "team_base_a", "type": "team_base", "x": margin + 1, "y": margin + 1, "name": "Base Alpha", "team": "alpha"})
+            objects.append({"id": "team_base_b", "type": "team_base", "x": sz - margin - 2, "y": sz - margin - 2, "name": "Base Beta", "team": "beta"})
+            # Zona de controle central
+            objects.append({"id": "control_zone_center", "type": "control_zone", "x": sz // 2, "y": sz // 2 - 4, "name": "Zona Central", "controlled_by": None, "capture_ticks": 0})
+            # Supply crates
+            for i, (sx, sy) in enumerate([(sz // 4, sz // 2), (sz * 3 // 4, sz // 2), (sz // 2, sz // 4)]):
+                objects.append({"id": f"supply_crate_{i}", "type": "supply_crate", "x": sx, "y": sy, "name": f"Caixote de Suprimentos {i+1}", "loot": ["ammo", "medkit"]})
+            # Ammo caches
+            for i, (ax, ay) in enumerate([(sz // 3, sz // 3), (sz * 2 // 3, sz // 3), (sz // 3, sz * 2 // 3)]):
+                objects.append({"id": f"ammo_cache_{i}", "type": "ammo_cache", "x": ax, "y": ay, "name": f"Depósito de Munição {i+1}", "ammo": 5})
+            # Throwables espalhados
+            for i in range(6):
+                tx, ty = random.randint(margin, sz - margin - 1), random.randint(margin, sz - margin - 1)
+                objects.append({"id": f"throwable_{i}", "type": "throwable_stone", "x": tx, "y": ty, "name": "Pedra Arremessável"})
+            # Cover
+            for i in range(4):
+                cx2, cy2 = random.randint(sz // 4, sz * 3 // 4), random.randint(sz // 4, sz * 3 // 4)
+                objects.append({"id": f"cover_{i}", "type": "cover", "x": cx2, "y": cy2, "name": f"Abrigo Tático {i+1}"})
+
+        elif mode in ("economy",):
+            # Posto de mercado central
+            objects.append({"id": "market_post_main", "type": "market_post", "x": sz // 2 + 2, "y": sz // 2 + 2, "name": "Mercado Central", "prices": {"fruit": 1, "water_bottle": 2, "wood": 1}})
+            objects.append({"id": "market_post_2", "type": "market_post", "x": sz * 3 // 4, "y": sz // 4, "name": "Mercado Norte", "prices": {"fruit": 2, "water_bottle": 1, "wood": 2}})
+            # Storage boxes
+            for i, (bx, by) in enumerate([(margin + 2, sz * 2 // 3), (sz - margin - 3, sz // 3)]):
+                objects.append({"id": f"storage_box_{i}", "type": "storage_box", "x": bx, "y": by, "name": f"Armazém {i+1}", "inventory": []})
+            # Trade orders board
+            objects.append({"id": "trade_board", "type": "trade_order", "x": sz // 2 - 3, "y": sz // 2 + 3, "name": "Quadro de Ordens", "orders": []})
+            # Contract items
+            objects.append({"id": "contract_item_1", "type": "contract_item", "x": sz // 4, "y": sz * 3 // 4, "name": "Contrato de Colheita", "reward": 5, "required": "fruit", "amount": 3})
+
+        elif mode in ("hybrid",):
+            # Composto de warfare + economy
+            objects.append({"id": "team_base_a", "type": "team_base", "x": margin + 1, "y": margin + 1, "name": "Base Alpha", "team": "alpha"})
+            objects.append({"id": "team_base_b", "type": "team_base", "x": sz - margin - 2, "y": sz - margin - 2, "name": "Base Beta", "team": "beta"})
+            objects.append({"id": "black_market", "type": "black_market", "x": sz // 2, "y": sz * 3 // 4, "name": "Mercado Negro", "risk": 0.3, "prices": {"ammo": 3, "weapon": 10}})
+            objects.append({"id": "sabotage_target_1", "type": "sabotage_target", "x": sz // 4, "y": sz // 2, "name": "Alvo de Sabotagem Alpha", "team_owner": "beta", "hp": 10})
+            objects.append({"id": "sabotage_target_2", "type": "sabotage_target", "x": sz * 3 // 4, "y": sz // 2, "name": "Alvo de Sabotagem Beta", "team_owner": "alpha", "hp": 10})
+            objects.append({"id": "depot_alpha", "type": "team_inventory_depot", "x": margin + 3, "y": margin + 3, "name": "Depósito Alpha", "team": "alpha", "inventory": []})
+            objects.append({"id": "depot_beta", "type": "team_inventory_depot", "x": sz - margin - 4, "y": sz - margin - 4, "name": "Depósito Beta", "team": "beta", "inventory": []})
+            for i in range(4):
+                tx, ty = random.randint(margin, sz - margin - 1), random.randint(margin, sz - margin - 1)
+                objects.append({"id": f"throwable_{i}", "type": "throwable_stone", "x": tx, "y": ty, "name": "Pedra Arremessável"})
+
+        return objects
+
+    def _spawn_mode_objects(self) -> None:
+        """Spawna objetos específicos do modo de jogo no mapa atual."""
+        mode_objects = self._get_mode_spawn_objects()
+        for obj in mode_objects:
+            eid = obj.pop("id", f"mode_obj_{len(self.entities)}")
+            self.add_entity(eid, obj)
+        if mode_objects:
+            logger.info(f"Mode '{self.game_mode}': spawned {len(mode_objects)} extra objects.")
+
+    # ── F08 — Catálogo de Missões ─────────────────────────────────────────────
+
+    def _init_missions(self) -> None:
+        """Inicializa o catálogo de 8 missões disponíveis."""
+        self.mission_catalog = [
+            {
+                "id": "explore_all_quadrants",
+                "name": "Explorador Completo",
+                "description": "Visite os 4 quadrantes do mapa.",
+                "type": "exploration",
+                "target": 4,
+                "bonus_score": 15.0,
+            },
+            {
+                "id": "collect_fruits",
+                "name": "Coletor de Frutas",
+                "description": "Coma ou colete 5 frutas.",
+                "type": "collect",
+                "target": 5,
+                "bonus_score": 10.0,
+            },
+            {
+                "id": "social_butterfly",
+                "name": "Borboleta Social",
+                "description": "Converse com todos os outros agentes vivos ao menos uma vez.",
+                "type": "social",
+                "target": 3,
+                "bonus_score": 12.0,
+            },
+            {
+                "id": "survival_100_ticks",
+                "name": "Sobrevivente",
+                "description": "Sobreviva sem morrer por 100 ticks.",
+                "type": "survival",
+                "target": 100,
+                "bonus_score": 20.0,
+            },
+            {
+                "id": "alliance_keeper",
+                "name": "Guardião da Aliança",
+                "description": "Mantenha uma aliança ativa por 30 ticks.",
+                "type": "alliance",
+                "target": 30,
+                "bonus_score": 18.0,
+            },
+            {
+                "id": "water_provider",
+                "name": "Provedor de Água",
+                "description": "Beba água 8 vezes.",
+                "type": "drink",
+                "target": 8,
+                "bonus_score": 8.0,
+            },
+            {
+                "id": "bury_2_bodies",
+                "name": "Coveiro da Ilha",
+                "description": "Enterre 2 corpos no cemitério.",
+                "type": "bury",
+                "target": 2,
+                "bonus_score": 14.0,
+            },
+            {
+                "id": "stay_healthy",
+                "name": "Saúde de Ferro",
+                "description": "Mantenha HP acima de 80% por 50 ticks consecutivos.",
+                "type": "health",
+                "target": 50,
+                "bonus_score": 16.0,
+            },
+        ]
+
+    def assign_missions(self) -> None:
+        """Atribui missões aleatórias únicas a cada agente na sessão."""
+        import random as rn
+        available = list(self.mission_catalog)
+        rn.shuffle(available)
+        for i, agent in enumerate(self.agents):
+            mission = available[i % len(available)]
+            agent.mission_id = mission["id"]
+            agent.mission_state = {"progress": 0, "visited_quadrants": [], "chat_targets": []}
+            agent.mission_completed_tick = None
+            agent.mission_bonus_score = 0.0
+            logger.debug(f"Mission assigned: {agent.name} → {mission['name']}")
+
+    def _tick_missions_f08(self, events: list) -> None:
+        """Avança o progresso de missões para cada agente vivo."""
+        for agent in self.agents:
+            if not agent.is_alive or not agent.mission_id:
+                continue
+            if agent.mission_completed_tick is not None:
+                continue
+
+            mission = next((m for m in self.mission_catalog if m["id"] == agent.mission_id), None)
+            if not mission:
+                continue
+
+            state = agent.mission_state
+            mtype = mission["type"]
+            target = mission["target"]
+            completed = False
+
+            if mtype == "exploration":
+                # Verifica quadrante atual
+                qx = 0 if agent.x < self.size // 2 else 1
+                qy = 0 if agent.y < self.size // 2 else 1
+                q_label = f"{qx}_{qy}"
+                visited = state.setdefault("visited_quadrants", [])
+                if q_label not in visited:
+                    visited.append(q_label)
+                state["progress"] = len(visited)
+                completed = len(visited) >= target
+
+            elif mtype == "collect":
+                state["progress"] = agent.apples_eaten
+                completed = agent.apples_eaten >= target
+
+            elif mtype == "social":
+                state["progress"] = len(state.get("chat_targets", []))
+                completed = state["progress"] >= target
+
+            elif mtype == "survival":
+                state["progress"] = min(agent.benchmark.get("ticks_survived", 0), target)
+                completed = state["progress"] >= target
+
+            elif mtype == "alliance":
+                if agent.alliance is not None:
+                    state["progress"] = self.ticks - agent.alliance_since_tick
+                else:
+                    state["progress"] = 0
+                completed = state["progress"] >= target
+
+            elif mtype == "drink":
+                state["progress"] = agent.water_drunk
+                completed = agent.water_drunk >= target
+
+            elif mtype == "bury":
+                state["progress"] = state.get("buried_count", 0)
+                completed = state["progress"] >= target
+
+            elif mtype == "health":
+                if agent.hp >= 80:
+                    state["progress"] = state.get("progress", 0) + 1
+                else:
+                    state["progress"] = 0
+                completed = state["progress"] >= target
+
+            if completed:
+                agent.mission_completed_tick = self.ticks
+                bonus = mission["bonus_score"]
+                agent.mission_bonus_score += bonus
+                agent.benchmark["score"] = agent.benchmark.get("score", 0) + bonus
+                events.append({
+                    "agent_id": agent.id, "name": agent.name,
+                    "action": "mission_complete",
+                    "event_msg": f"🏅 {agent.name} concluiu a missão '{mission['name']}' (+{bonus} pts)!"
+                })
+                logger.info(f"Mission complete: {agent.name} → {mission['name']} (+{bonus})")
+
+    # ── F04 — Engine de Eventos Dinâmicos ─────────────────────────────────────
+
+    DYNAMIC_EVENTS = {
+        "tempestade": {
+            "name": "🌩️ Tempestade",
+            "message": "Uma tempestade violenta assola a ilha! Todos perdem HP.",
+            "duration": 10,
+            "hp_delta": -5,
+            "hunger_delta": 0,
+            "thirst_delta": -10,  # chuva enche água
+        },
+        "seca": {
+            "name": "🌵 Grande Seca",
+            "message": "Uma seca intensa se instala. A sede aumenta rapidamente.",
+            "duration": 15,
+            "hp_delta": -2,
+            "hunger_delta": -3,
+            "thirst_delta": -8,
+        },
+        "suprimentos": {
+            "name": "📦 Queda de Suprimentos",
+            "message": "Um avião anônimo lança caixotes de suprimentos no centro da ilha!",
+            "duration": 5,
+            "hp_delta": 0,
+            "hunger_delta": 0,
+            "thirst_delta": 0,
+            "spawn_supplies": True,
+        },
+        "radio": {
+            "name": "📻 Transmissão de Rádio",
+            "message": "Um rádio misterioso transmite uma mensagem de fora da ilha: 'Ajuda a caminho... talvez.'",
+            "duration": 3,
+            "hp_delta": 5,   # Moral boost
+            "hunger_delta": 0,
+            "thirst_delta": 0,
+        },
+        "eclipse": {
+            "name": "🌑 Eclipse Solar",
+            "message": "O sol desaparece! Um eclipse cobre a ilha, desorientando todos.",
+            "duration": 8,
+            "hp_delta": -1,
+            "hunger_delta": -5,
+            "thirst_delta": 0,
+            "force_night": True,
+        },
+    }
+
+    def trigger_event(self, event_type: str) -> dict:
+        """Dispara um evento global. Retorna o dict do evento."""
+        template = self.DYNAMIC_EVENTS.get(event_type)
+        if not template:
+            return {}
+        event = {
+            **template,
+            "type": event_type,
+            "start_tick": self.ticks,
+            "end_tick": self.ticks + template["duration"],
+        }
+        self.active_event = event
+        self.event_end_tick = event["end_tick"]
+        self.event_history.append(event)
+        logger.info(f"F04: Event triggered: {event_type} at tick {self.ticks}")
+        return event
+
+    def _tick_events_f04(self, events: list) -> None:
+        """Aplica efeitos de evento ativo e sorteia novo evento aleatório."""
+        # 1. Limpa evento expirado
+        if self.active_event and self.ticks >= self.event_end_tick:
+            logger.info(f"F04: Event ended: {self.active_event['type']}")
+            self.active_event = None
+
+        # 2. Aplica efeitos do evento ativo em todos os agentes vivos
+        if self.active_event:
+            ev = self.active_event
+            hp_d = ev.get("hp_delta", 0)
+            h_d = ev.get("hunger_delta", 0)
+            t_d = ev.get("thirst_delta", 0)
+            for agent in self.agents:
+                if not agent.is_alive:
+                    continue
+                if hp_d != 0:
+                    agent.hp = max(0, min(100, agent.hp + hp_d))
+                if h_d != 0:
+                    agent.hunger = max(0, min(100, agent.hunger + h_d))
+                if t_d != 0:
+                    agent.thirst = max(0, min(100, agent.thirst + t_d))
+
+            # Spawn suprimentos se configurado (só no primeiro tick do evento)
+            if ev.get("spawn_supplies") and self.ticks == ev["start_tick"]:
+                cx, cy = self.size // 2, self.size // 2
+                for i in range(3):
+                    eid = f"supply_drop_{self.ticks}_{i}"
+                    self.add_entity(eid, {"type": "supply_crate", "x": cx + i, "y": cy,
+                                          "name": f"Suprimentos Aéreos {i+1}", "loot": ["fruit", "water_bottle"]})
+
+            # Broadcast do evento (só no primeiro tick)
+            if self.ticks == ev["start_tick"]:
+                events.append({
+                    "agent_id": None, "name": None,
+                    "action": "event",
+                    "event_msg": f"{ev['name']}: {ev['message']}"
+                })
+
+        # 3. Sorteia novo evento se nenhum ativo
+        if not self.active_event and random.random() < self.event_chance:
+            event_type = random.choice(list(self.DYNAMIC_EVENTS.keys()))
+            ev = self.trigger_event(event_type)
+            if ev:
+                events.append({
+                    "agent_id": None, "name": None,
+                    "action": "event",
+                    "event_msg": f"{ev['name']}: {ev['message']}"
+                })
+
+    # ── F07 — Reputação Social e Alianças ─────────────────────────────────────
+
+    def form_alliance(self, agent_a_id: str, agent_b_name: str) -> dict:
+        """Forma aliança entre agente A e o agente com nome agent_b_name."""
+        agent_a = next((a for a in self.agents if a.id == agent_a_id), None)
+        agent_b = next((a for a in self.agents if a.name == agent_b_name and a.is_alive), None)
+        if not agent_a or not agent_b:
+            return {"error": "Agente não encontrado"}
+        agent_a.alliance = agent_b.name
+        agent_a.alliance_since_tick = self.ticks
+        agent_b.alliance = agent_a.name
+        agent_b.alliance_since_tick = self.ticks
+        agent_a.reputation_score = min(100.0, agent_a.reputation_score + 5.0)
+        agent_b.reputation_score = min(100.0, agent_b.reputation_score + 5.0)
+        logger.info(f"F07: Alliance formed: {agent_a.name} ↔ {agent_b.name}")
+        return {"alliance": f"{agent_a.name} ↔ {agent_b.name}", "since_tick": self.ticks}
+
+    def break_alliance(self, agent_id: str, betrayal: bool = False) -> dict:
+        """Quebra aliança do agente. Se betrayal=True, aplica penalidade de reputação."""
+        agent = next((a for a in self.agents if a.id == agent_id), None)
+        if not agent:
+            return {"error": "Agente não encontrado"}
+        ally_name = agent.alliance
+        # Quebra no aliado também
+        ally = next((a for a in self.agents if a.name == ally_name), None)
+        if ally:
+            ally.alliance = None
+        agent.alliance = None
+        if betrayal:
+            agent.betrayals += 1
+            agent.reputation_score = max(-100.0, agent.reputation_score + self.betrayal_penalty)
+            logger.info(f"F07: Betrayal by {agent.name}! Reputation: {agent.reputation_score}")
+        return {"status": "alliance_broken", "betrayal": betrayal, "agent": agent.name}
+
+    def _tick_reputation_f07(self, events: list) -> None:
+        """Aplica bônus de HP para aliados próximos e atualiza reputação por tick."""
+        for agent in self.agents:
+            if not agent.is_alive or not agent.alliance:
+                continue
+            ally = next((a for a in self.agents if a.name == agent.alliance and a.is_alive), None)
+            if not ally:
+                # Aliado morreu — remove aliança automaticamente
+                agent.alliance = None
+                continue
+            # Bônus de HP se aliados estão a menos de 3 tiles
+            dist = abs(agent.x - ally.x) + abs(agent.y - ally.y)
+            if dist <= 3:
+                bonus = self.alliance_bonus_hp_per_tick
+                agent.hp = min(100, agent.hp + bonus)
+                ally.hp = min(100, ally.hp + bonus)
+            # Leve acúmulo de reputação por manter aliança
+            agent.reputation_score = min(100.0, agent.reputation_score + 0.05)
+
 
     def add_entity(self, entity_id: str, data: dict):
         self.entities[entity_id] = data
-        
+
     def add_agent(self, agent):
         # Prevent spawn on top of obstacles
         while not self._is_walkable(agent.x, agent.y) or any(a.x == agent.x and a.y == agent.y for a in self.agents):
@@ -235,8 +741,8 @@ class World:
                 if getattr(agent, 'is_zombie', False):
                     # Check if zombie is safely inside a house
                     is_safe_inside = False
-                    for hx, hy in [(2,2), (17,17), (17,2), (2,17)]:
-                        if abs(agent.x - hx) + abs(agent.y - hy) <= 2:
+                    for hx, hy in self.house_positions:
+                        if abs(agent.x - hx) + abs(agent.y - hy) <= self.house_shelter_radius:
                             is_safe_inside = True
                             break
                     
@@ -318,13 +824,10 @@ class World:
                     
                 # Check Night Cold Damage
                 if is_night_now:
-                    home_x, home_y = 2, 2
-                    if agent.name == "Maria": home_x, home_y = 17, 17
-                    elif agent.name == "Zeca": home_x, home_y = 17, 2
-                    elif agent.name not in ["João", "Maria", "Zeca"]: home_x, home_y = 2, 17 # Elly/Carla
-                    
+                    home_x, home_y = self.house_by_name.get(agent.name, self.house_positions[3])
+
                     dist_to_home = abs(agent.x - home_x) + abs(agent.y - home_y)
-                    if dist_to_home > 2:
+                    if dist_to_home > self.house_shelter_radius:
                         agent.hp -= 2
                         if self.ticks % 5 == 0:
                             events.append({"agent_id": agent.id, "action": "busy", "name": agent.name, "event_msg": "está congelando de frio lá fora! Preciso ir pra casa! 🥶"})
@@ -454,6 +957,7 @@ class World:
                     just_arrived = self.ticks <= getattr(agent, 'arrival_tick', -1)
                     if agent.is_alive and not getattr(agent, 'is_remote', False) and not is_walking and not just_arrived and agent.id not in self.thinking_agents:
                         context = self._get_context_for_agent(agent)
+                        agent._game_mode = self.game_mode  # Thinker usa para variar prompt
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
         else:
             if self.ticks % self.ai_interval == 0 and self.agents and not self.game_over:
@@ -467,11 +971,37 @@ class World:
                     # Only trigger if not remote AND not already thinking AND not walking AND not just arrived
                     is_walking = getattr(agent, 'target_x', None) is not None
                     just_arrived = self.ticks <= getattr(agent, 'arrival_tick', -1)
+                    reason_block = f"remote:{getattr(agent, 'is_remote', False)} thinking:{agent.id in self.thinking_agents} walking:{is_walking} arrived:{just_arrived}"
+                    logger.info(f"Eval {agent.name}: {reason_block}")
                     if not getattr(agent, 'is_remote', False) and agent.id not in self.thinking_agents and not is_walking and not just_arrived:
+                        logger.info(f"==> DISPATCHING AI TASK para {agent.name}")
                         context = self._get_context_for_agent(agent)
+                        agent._game_mode = self.game_mode  # Thinker usa para variar prompt
                         asyncio.create_task(self._run_agent_ai_task(agent, context))
-                
+
+        # ── F04/F07/F08 — Motores de fase 3 ──────────────────────────────────
+        self._tick_events_f04(events)
+        self._tick_missions_f08(events)
+        self._tick_reputation_f07(events)
+
+        # ── F12 — Gincana Engine ──────────────────────────────────────────────
+        if self.game_mode == "gincana" and self.gincana.active:
+            self.gincana.tick(events)
+
+        # ── F13-F16 — Warfare Engine ──────────────────────────────────────────
+        if self.game_mode == "warfare" and self.warfare.active:
+            self.warfare.tick(events)
+
+        # ── F10+F17+F18+F19 — Economy Engine ───────────────────────────────
+        if self.economy.active:
+            self.economy.tick(events)
+
+        # ── F20 — GangWar Engine ─────────────────────────────────────────────
+        if self.game_mode in ("gangwar", "hybrid") and self.gangwar.active:
+            self.gangwar.tick(events)
+
         return events
+
 
     def _check_auto_interactions(self, agent, events):
         """Processes automatic actions like gathering and picking up items upon collision/proximity."""
@@ -517,7 +1047,7 @@ class World:
 
         # 4. Auto Bury if at cemetery
         if carried_body and "dead_body" in agent.inventory:
-            if abs(agent.x - 15) <= 2 and abs(agent.y - 5) <= 2:
+            if abs(agent.x - self.cemetery_x) <= 2 and abs(agent.y - self.cemetery_y) <= 2:
                 carried_body.is_buried = True
                 carried_body.carried_by = None
                 agent.held_item = None
@@ -629,7 +1159,16 @@ class World:
         day_pos = self.ticks % self.DAY_CYCLE
         is_night = 80 <= day_pos < 110
 
-        return {
+        # F01 — Verificar e expirar human_command
+        human_command = getattr(agent, "human_command", None)
+        command_expire_tick = getattr(agent, "command_expire_tick", 0)
+        if human_command is not None and self.ticks >= command_expire_tick:
+            agent.human_command = None
+            agent.command_expire_tick = 0
+            agent.command_source = "ai"
+            human_command = None
+
+        context = {
             "time": self.ticks,
             "is_night": is_night,
             "ai_provider": self.ai_provider,
@@ -642,8 +1181,75 @@ class World:
             "inventory": agent.inventory,
             "is_moving_automatically_to": (agent.target_x, agent.target_y) if agent.target_x is not None else None,
             "is_carrying_body": is_carrying_body,
-            "carrying_name": carrying_name
+            "carrying_name": carrying_name,
+            # F01 — Comando humano injetado no contexto
+            "human_command": human_command,
+            "command_source": getattr(agent, "command_source", "ai"),
+            "game_mode": self.game_mode,
         }
+
+        # ── Injeta info específica do engine ativo ──
+        if self.game_mode == "warfare" and self.warfare.active:
+            wf_faction = self.warfare.agent_factions.get(agent.id)
+            wf_role = self.warfare.agent_roles.get(agent.id)
+            context["warfare_info"] = {
+                "faction": wf_faction,
+                "role": wf_role,
+                "alpha_score": self.warfare.faction_scores.get("alpha", 0),
+                "beta_score": self.warfare.faction_scores.get("beta", 0),
+                "alpha_base_hp": self.warfare.base_hp.get("alpha", 100),
+                "beta_base_hp": self.warfare.base_hp.get("beta", 100),
+                "territory_holder": self.warfare.territory_holder,
+                "territory_ticks": self.warfare.territory_contest_ticks,
+                "throws": len(self.warfare.throw_log),
+            }
+            # Info extra para reachable_now
+            enemy_faction = "beta" if wf_faction == "alpha" else "alpha"
+            for v in visible_entities:
+                if v.get("type") == "agent":
+                    v_faction = self.warfare.agent_factions.get(v.get("id", ""))
+                    if v_faction:
+                        v["faction"] = v_faction
+                        v["is_enemy"] = v_faction != wf_faction
+
+        elif self.game_mode == "gincana" and self.gincana.active:
+            captured_count = sum(1 for v in self.gincana.checkpoints_captured.values() if v is not None)
+            total_cps = len(self.gincana.checkpoints_captured)
+            context["gincana_info"] = {
+                "checkpoints_status": f"{captured_count}/{total_cps}",
+                "artifact_collected": self.gincana.artifact_holder is not None,
+                "artifact_holder": self.gincana.artifact_holder,
+                "delivery_done": len(self.gincana.deliveries) > 0,
+                "remaining_ticks": self.gincana.remaining_ticks(),
+                "my_score": self.gincana.gincana_scores.get(agent.id, 0),
+            }
+            # Marca checkpoints visíveis como capturados ou não
+            for v in visible_entities:
+                if v.get("type") == "checkpoint":
+                    cp_id = next((eid for eid, e in self.entities.items() if e is v), None)
+                    if cp_id:
+                        v["captured"] = self.gincana.checkpoints_captured.get(cp_id) is not None
+
+        elif self.game_mode == "economy" and self.economy.active:
+            context["economy_info"] = {
+                "balance": self.economy.coins.get(agent.id, 0),
+                "recipes": ", ".join(self.economy.recipes.keys()) if hasattr(self.economy, 'recipes') else "axe, raft, wall, torch, bandage",
+                "market_summary": "Vá até um Mercado para ver preços",
+                "contracts_count": len(getattr(self.economy, 'active_contracts', [])),
+            }
+
+        elif self.game_mode in ("gangwar", "hybrid") and self.gangwar.active:
+            gw_gang = self.gangwar.agent_gangs.get(agent.id)
+            context["gangwar_info"] = {
+                "faction": gw_gang,
+                "faction_scores": self.gangwar.gang_scores,
+                "depot_alpha_hp": sum(self.gangwar.depots.get("alpha", {}).values()),
+                "depot_beta_hp": sum(self.gangwar.depots.get("beta", {}).values()),
+                "bm_prices": self.gangwar.bm_prices,
+            }
+
+        return context
+
         
     def _is_walkable(self, x, y):
         # Verifica se as coordenadas estão dentro dos limites do mapa e não contêm obstáculos
@@ -814,7 +1420,7 @@ class World:
                  action_event["event_msg"] = "TENTOU BEBER mas não tem garrafa d'água na bolsa! Vá ao lago e use 'fill_bottle'."
 
         elif act_type == "die":
-            action_event["event_msg"] = "MORREU E CAIU NO CHÃO! 💀. Alguém precisa levá-lo ao cemitério (15,5)!"
+            action_event["event_msg"] = f"MORREU E CAIU NO CHÃO! 💀. Alguém precisa levá-lo ao cemitério ({self.cemetery_x},{self.cemetery_y})!"
             logger.warning(f"DEATH: {agent.name} is down at {agent.x},{agent.y}")
             # Ensure entity is marked as dead immediately for AI visibility
             if agent.id in self.entities:
@@ -875,7 +1481,7 @@ class World:
             # Check if carrying a body and at cemetery area (radius 2 for tolerance)
             carried_body = next((a for a in self.agents if a.carried_by == agent.id), None)
             if carried_body:
-                if abs(agent.x - 15) <= 2 and abs(agent.y - 5) <= 2:
+                if abs(agent.x - self.cemetery_x) <= 2 and abs(agent.y - self.cemetery_y) <= 2:
                     carried_body.is_buried = True
                     carried_body.carried_by = None
                     agent.held_item = None
@@ -916,7 +1522,7 @@ class World:
                         self.add_pending_agent(new_agent, 10)
                         action_event["event_msg"] += f" | UM NOVO SOBREVIVENTE ({name}) CHEGARÁ EM 10 SEGUNDOS!"
                 else:
-                    action_event["event_msg"] = "TENTOU ENTERRAR mas não está no Cemitério (15,5)!"
+                    action_event["event_msg"] = f"TENTOU ENTERRAR mas não está no Cemitério ({self.cemetery_x},{self.cemetery_y})!"
             else:
                 action_event["event_msg"] = "TENTOU ENTERRAR mas não está carregando ninguém."
 
@@ -979,8 +1585,11 @@ class World:
                      "apples_eaten": getattr(agent, "apples_eaten", 0),
                      "water_drunk": getattr(agent, "water_drunk", 0),
                      "chats_sent": getattr(agent, "chats_sent", 0),
-                     "is_zombie": getattr(agent, "is_zombie", False)
+                     "is_zombie": getattr(agent, "is_zombie", False),
+                     "human_command": getattr(agent, "human_command", None),
+                     "command_source": getattr(agent, "command_source", "ai"),
                  })
+
                  
         next_agent_name = None
         if self.ai_interval > 0:
@@ -1037,7 +1646,21 @@ class World:
             "ai_model": self.ai_model,
             "omniroute_url": self.omniroute_url,
             "day_cycle": self.ticks % self.DAY_CYCLE,
-            "is_night": 80 <= (self.ticks % self.DAY_CYCLE) < 110
+            "is_night": 80 <= (self.ticks % self.DAY_CYCLE) < 110,
+            "game_mode": self.game_mode,
+            # F04 — Evento ativo
+            "active_event": self.active_event,
+            "event_history_count": len(self.event_history),
+            # F08 — Catálogo de missões
+            "mission_catalog_count": len(self.mission_catalog),
+            # F12 — Gincana
+            "gincana": self.gincana.get_state() if self.game_mode == "gincana" else None,
+            # F13-F16 — Warfare
+            "warfare": self.warfare.get_state() if self.game_mode == "warfare" else None,
+            # F10+F17+F18+F19 — Economy (sempre exposto independente de modo)
+            "economy": self.economy.get_state(),
+            # F20 — Guerra de Gangues
+            "gangwar": self.gangwar.get_state() if self.game_mode in ("gangwar", "hybrid") else None,
         }
 
     def reset_agents(self, AgentClass, player_count=None):
@@ -1056,10 +1679,10 @@ class World:
         # Possible Initial Squad
         # Possible Initial Squad with fixed IDs
         squad = [
-            AgentClass("João", "Pragmático. Você foca em encontrar comida, árvores de frutos e não morrer de fome. Só pensa na sobrevivência.", 2, 2, agent_id="sys_joao"),
-            AgentClass("Maria", "Arquiteta. Você quer construir abrigos e pontes. Gosta de coletar madeira e pedra, e falar sobre plantas de casas.", 17, 17, agent_id="sys_maria"),
-            AgentClass("Zeca", "Zeca é um surfista relaxado. Ele gosta de ficar perto do lago, beber água e conversar sobre a vibe da ilha.", 17, 2, agent_id="sys_zeca"),
-            AgentClass("Elly", "Elly é uma cozinheira. Ela quer juntar o máximo de frutas possível e organizar um banquete.", 2, 17, agent_id="sys_elly")
+            AgentClass("João", "Pragmático. Você foca em encontrar comida, árvores de frutos e não morrer de fome. Só pensa na sobrevivência.", self.house_positions[0][0], self.house_positions[0][1], agent_id="sys_joao"),
+            AgentClass("Maria", "Arquiteta. Você quer construir abrigos e pontes. Gosta de coletar madeira e pedra, e falar sobre plantas de casas.", self.house_positions[1][0], self.house_positions[1][1], agent_id="sys_maria"),
+            AgentClass("Zeca", "Zeca é um surfista relaxado. Ele gosta de ficar perto do lago, beber água e conversar sobre a vibe da ilha.", self.house_positions[2][0], self.house_positions[2][1], agent_id="sys_zeca"),
+            AgentClass("Elly", "Elly é uma cozinheira. Ela quer juntar o máximo de frutas possível e organizar um banquete.", self.house_positions[3][0], self.house_positions[3][1], agent_id="sys_elly")
         ]
 
         # Atribui um perfil de IA diferente para cada personagem default
@@ -1084,4 +1707,20 @@ class World:
         self.tournament_end_tick = None
         self.active_tournament_id = None
         self._init_map()
-        logger.info("World reset triggered with house spawns.")
+        # Auto-start do engine do modo ativo; desativar engines de modos anteriores
+        self.gincana.active = False
+        self.warfare.active = False
+        self.economy.active = False
+        self.gangwar.active = False
+        if self.game_mode == "gincana":
+            self.gincana.start()
+        elif self.game_mode == "warfare":
+            self.warfare.start()
+        elif self.game_mode == "economy":
+            self.economy.start()
+        elif self.game_mode in ("gangwar", "hybrid"):
+            self.gangwar.start()
+        # Economy sempre roda em paralelo (crafting disponível em qualquer modo)
+        if self.game_mode != "economy":
+            self.economy.start()
+        logger.info(f"World reset triggered with house spawns. Mode engine '{self.game_mode}' auto-started.")

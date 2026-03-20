@@ -1,15 +1,19 @@
 // BBB IA - Frontend 3D Engine
-const WORLD_SIZE = 20;
+const worldSizeParam = new URLSearchParams(window.location.search).get('world_size');
+const WORLD_SIZE = Number.parseInt(worldSizeParam || localStorage.getItem('bbb_world_size') || '32', 10);
 const TILE_SIZE = 2; // Size of each grid block in 3D units
+const WORLD_CAMERA_HEIGHT = Math.max(30, Math.floor(WORLD_SIZE * 1.1));
+const WORLD_CAMERA_DISTANCE = Math.max(10, Math.floor(WORLD_SIZE * 0.6));
+const WORLD_FOG_FAR = Math.max(80, WORLD_SIZE * TILE_SIZE * 2.5);
 
 // Scene Setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB); // Sky
-scene.fog = new THREE.Fog(0x87CEEB, 20, 80);
+scene.fog = new THREE.Fog(0x87CEEB, 20, WORLD_FOG_FAR);
 
 const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
 // Start high up looking down (God View)
-camera.position.set(WORLD_SIZE, 30, WORLD_SIZE + 10);
+camera.position.set(WORLD_SIZE, WORLD_CAMERA_HEIGHT, WORLD_SIZE + WORLD_CAMERA_DISTANCE);
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -24,15 +28,16 @@ const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
 scene.add(ambientLight);
 
 const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-dirLight.position.set(20, 40, 20);
+dirLight.position.set(WORLD_SIZE, Math.max(40, WORLD_SIZE * 2), WORLD_SIZE);
 dirLight.castShadow = true;
 // Enhance shadow quality
 dirLight.shadow.mapSize.width = 2048;
 dirLight.shadow.mapSize.height = 2048;
-dirLight.shadow.camera.left = -30;
-dirLight.shadow.camera.right = 30;
-dirLight.shadow.camera.top = 30;
-dirLight.shadow.camera.bottom = -30;
+const SHADOW_HALF_SPAN = Math.max(30, Math.floor(WORLD_SIZE * 1.6));
+dirLight.shadow.camera.left = -SHADOW_HALF_SPAN;
+dirLight.shadow.camera.right = SHADOW_HALF_SPAN;
+dirLight.shadow.camera.top = SHADOW_HALF_SPAN;
+dirLight.shadow.camera.bottom = -SHADOW_HALF_SPAN;
 scene.add(dirLight);
 
 // Materials
@@ -578,6 +583,297 @@ function createCemeteryArea() {
     return group;
 }
 
+// ══════════════════════════════════════════════════════
+//  MODE-SPECIFIC ENTITY CREATORS (F12–F20)
+// ══════════════════════════════════════════════════════
+
+// ── Materials para modos ───────────────────────────────
+const matCheckpoint = new THREE.MeshPhongMaterial({ color: 0xFFD700, emissive: 0x332600, shininess: 80 });
+const matArtifact   = new THREE.MeshPhongMaterial({ color: 0xE040FB, emissive: 0x3A0038, shininess: 100 });
+const matDelivery   = new THREE.MeshPhongMaterial({ color: 0x00E676, emissive: 0x002200, shininess: 60 });
+const matBaseAlpha  = new THREE.MeshLambertMaterial({ color: 0x2196F3 });
+const matBaseBeta   = new THREE.MeshLambertMaterial({ color: 0xF44336 });
+const matControlZone= new THREE.MeshPhongMaterial({ color: 0xFFEB3B, transparent: true, opacity: 0.5 });
+const matSupplyCrate= new THREE.MeshLambertMaterial({ color: 0x795548 });
+const matAmmoCache  = new THREE.MeshLambertMaterial({ color: 0x607D8B });
+const matThrowable  = new THREE.MeshLambertMaterial({ color: 0x9E9E9E });
+const matCover      = new THREE.MeshLambertMaterial({ color: 0x5D4037 });
+const matMarket     = new THREE.MeshLambertMaterial({ color: 0xFF9800 });
+const matStorage    = new THREE.MeshLambertMaterial({ color: 0x8D6E63 });
+const matTradeBoard = new THREE.MeshLambertMaterial({ color: 0xFFC107 });
+const matContract   = new THREE.MeshPhongMaterial({ color: 0x4FC3F7, emissive: 0x01579B });
+const matBlackMarket= new THREE.MeshPhongMaterial({ color: 0x9C27B0, emissive: 0x1A0025, shininess: 80 });
+const matSabotage   = new THREE.MeshPhongMaterial({ color: 0xFF5722, emissive: 0x3E1100 });
+const matDepot      = new THREE.MeshLambertMaterial({ color: 0x4CAF50 });
+
+function _addModeLabel(group, text, bgColor) {
+    const label = document.createElement('div');
+    label.className = 'name-label';
+    label.innerText = text;
+    label.style.backgroundColor = bgColor || 'rgba(0,0,0,0.8)';
+    label.style.fontSize = '10px';
+    label.style.padding = '2px 6px';
+    label.style.border = '1px solid rgba(255,255,255,0.3)';
+    document.getElementById('bubbles-layer').appendChild(label);
+    group.userData = group.userData || {};
+    group.userData.nameElement = label;
+    return label;
+}
+
+// ── Gincana ────────────────────────────────────────────
+function createCheckpoint(name) {
+    const group = new THREE.Group();
+    // Pillar
+    const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.3, 3), matCheckpoint);
+    pillar.position.y = 1.5;
+    pillar.castShadow = true;
+    group.add(pillar);
+    // Flag on top
+    const flag = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.6, 0.05), new THREE.MeshLambertMaterial({ color: 0xFFFFFF }));
+    flag.position.set(0.5, 3.0, 0);
+    group.add(flag);
+    // Ring at base
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(1.0, 0.1, 8, 16), matCheckpoint);
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.1;
+    group.add(ring);
+    _addModeLabel(group, `🏁 ${name || 'Checkpoint'}`, 'rgba(255,215,0,0.6)');
+    return group;
+}
+
+function createArtifact(name) {
+    const group = new THREE.Group();
+    // Floating gem
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.6), matArtifact);
+    gem.position.y = 1.5;
+    gem.castShadow = true;
+    group.add(gem);
+    // Glow ring
+    const glow = new THREE.Mesh(new THREE.TorusGeometry(0.8, 0.05, 8, 16), matArtifact);
+    glow.rotation.x = Math.PI / 2;
+    glow.position.y = 1.5;
+    group.add(glow);
+    _addModeLabel(group, `💎 ${name || 'Artefato'}`, 'rgba(224,64,251,0.6)');
+    return group;
+}
+
+function createDeliveryMarker(name) {
+    const group = new THREE.Group();
+    // Platform
+    const platform = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 1.2, 0.2, 6), matDelivery);
+    platform.position.y = 0.1;
+    group.add(platform);
+    // Arrow pointing down
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.4, 1.0, 4), matDelivery);
+    arrow.position.y = 1.5;
+    arrow.rotation.z = Math.PI;
+    group.add(arrow);
+    _addModeLabel(group, `📍 ${name || 'Entrega'}`, 'rgba(0,230,118,0.6)');
+    return group;
+}
+
+// ── Warfare ────────────────────────────────────────────
+function createTeamBase(name, team) {
+    const group = new THREE.Group();
+    const mat = (team === 'alpha') ? matBaseAlpha : matBaseBeta;
+    // Fort walls
+    const wall1 = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 0.3), mat);
+    wall1.position.set(0, 1, 1.5);
+    group.add(wall1);
+    const wall2 = new THREE.Mesh(new THREE.BoxGeometry(3, 2, 0.3), mat);
+    wall2.position.set(0, 1, -1.5);
+    group.add(wall2);
+    const wall3 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2, 3), mat);
+    wall3.position.set(1.5, 1, 0);
+    group.add(wall3);
+    const wall4 = new THREE.Mesh(new THREE.BoxGeometry(0.3, 2, 3), mat);
+    wall4.position.set(-1.5, 1, 0);
+    group.add(wall4);
+    // Flag
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 3.5), matWood);
+    pole.position.y = 1.75;
+    group.add(pole);
+    const teamFlag = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.5, 0.05), mat);
+    teamFlag.position.set(0.4, 3.2, 0);
+    group.add(teamFlag);
+    [wall1, wall2, wall3, wall4].forEach(w => { w.castShadow = true; w.receiveShadow = true; });
+    const icon = team === 'alpha' ? '🔵' : '🔴';
+    _addModeLabel(group, `${icon} ${name || 'Base'}`, team === 'alpha' ? 'rgba(33,150,243,0.6)' : 'rgba(244,67,54,0.6)');
+    return group;
+}
+
+function createControlZone(name) {
+    const group = new THREE.Group();
+    // Glowing platform
+    const platform = new THREE.Mesh(new THREE.CylinderGeometry(2.0, 2.0, 0.15, 16), matControlZone);
+    platform.position.y = 0.08;
+    group.add(platform);
+    // Center marker
+    const marker = new THREE.Mesh(new THREE.ConeGeometry(0.3, 1.5, 4), matCheckpoint);
+    marker.position.y = 0.8;
+    group.add(marker);
+    _addModeLabel(group, `⚔️ ${name || 'Zona'}`, 'rgba(255,235,59,0.6)');
+    return group;
+}
+
+function createSupplyCrate(name) {
+    const group = new THREE.Group();
+    const crate = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.8, 1.0), matSupplyCrate);
+    crate.position.y = 0.4;
+    crate.castShadow = true;
+    group.add(crate);
+    // Cross mark
+    const cross = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.1, 0.1), new THREE.MeshLambertMaterial({ color: 0xF44336 }));
+    cross.position.set(0, 0.81, 0.51);
+    group.add(cross);
+    const cross2 = new THREE.Mesh(new THREE.BoxGeometry(0.1, 0.1, 0.6), new THREE.MeshLambertMaterial({ color: 0xF44336 }));
+    cross2.position.set(0, 0.81, 0.51);
+    group.add(cross2);
+    _addModeLabel(group, `📦 ${name || 'Suprimentos'}`, 'rgba(121,85,72,0.6)');
+    return group;
+}
+
+function createAmmoCache(name) {
+    const group = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.5, 0.5), matAmmoCache);
+    box.position.y = 0.25;
+    box.castShadow = true;
+    group.add(box);
+    _addModeLabel(group, `🔫 ${name || 'Munição'}`, 'rgba(96,125,139,0.6)');
+    return group;
+}
+
+function createThrowableStone() {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), matThrowable);
+    mesh.position.y = 0.3;
+    mesh.castShadow = true;
+    return mesh;
+}
+
+function createCover(name) {
+    const group = new THREE.Group();
+    // Sandbag wall
+    const wall = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.8, 0.5), matCover);
+    wall.position.y = 0.4;
+    wall.castShadow = true;
+    group.add(wall);
+    _addModeLabel(group, `🛡️ ${name || 'Abrigo'}`, 'rgba(93,64,55,0.6)');
+    return group;
+}
+
+// ── Economy ────────────────────────────────────────────
+function createMarketPost(name) {
+    const group = new THREE.Group();
+    // Stall structure
+    const counter = new THREE.Mesh(new THREE.BoxGeometry(2, 1, 1), matMarket);
+    counter.position.y = 0.5;
+    counter.castShadow = true;
+    group.add(counter);
+    // Canopy
+    const canopy = new THREE.Mesh(new THREE.BoxGeometry(2.5, 0.1, 1.5), new THREE.MeshLambertMaterial({ color: 0xE65100 }));
+    canopy.position.y = 2.0;
+    group.add(canopy);
+    // Poles
+    for (const dx of [-1, 1]) {
+        const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2), matWood);
+        pole.position.set(dx * 1.1, 1, 0.7);
+        group.add(pole);
+    }
+    _addModeLabel(group, `🏪 ${name || 'Mercado'}`, 'rgba(255,152,0,0.6)');
+    return group;
+}
+
+function createStorageBox(name) {
+    const group = new THREE.Group();
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.0, 1.2), matStorage);
+    box.position.y = 0.5;
+    box.castShadow = true;
+    group.add(box);
+    // Lid
+    const lid = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.1, 1.3), matWood);
+    lid.position.y = 1.05;
+    group.add(lid);
+    _addModeLabel(group, `📦 ${name || 'Armazém'}`, 'rgba(141,110,99,0.6)');
+    return group;
+}
+
+function createTradeBoard(name) {
+    const group = new THREE.Group();
+    // Sign post
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 2.5), matWood);
+    pole.position.y = 1.25;
+    group.add(pole);
+    // Board
+    const board = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.0, 0.1), matTradeBoard);
+    board.position.y = 2.0;
+    board.castShadow = true;
+    group.add(board);
+    _addModeLabel(group, `📋 ${name || 'Ordens'}`, 'rgba(255,193,7,0.6)');
+    return group;
+}
+
+function createContractItem(name) {
+    const group = new THREE.Group();
+    // Scroll
+    const scroll = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.15, 0.8, 8), matContract);
+    scroll.position.y = 0.5;
+    scroll.rotation.z = Math.PI / 6;
+    scroll.castShadow = true;
+    group.add(scroll);
+    _addModeLabel(group, `📜 ${name || 'Contrato'}`, 'rgba(79,195,247,0.6)');
+    return group;
+}
+
+// ── Hybrid/GangWar ─────────────────────────────────────
+function createBlackMarket(name) {
+    const group = new THREE.Group();
+    // Dark tent
+    const tent = new THREE.Mesh(new THREE.ConeGeometry(1.5, 2.5, 6), matBlackMarket);
+    tent.position.y = 1.25;
+    tent.castShadow = true;
+    group.add(tent);
+    // Crates around
+    for (let i = 0; i < 3; i++) {
+        const crate = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.4, 0.5), matAmmoCache);
+        crate.position.set(Math.cos(i*2.1)*1.2, 0.2, Math.sin(i*2.1)*1.2);
+        group.add(crate);
+    }
+    _addModeLabel(group, `🏴 ${name || 'Mercado Negro'}`, 'rgba(156,39,176,0.6)');
+    return group;
+}
+
+function createSabotageTarget(name) {
+    const group = new THREE.Group();
+    // Target structure
+    const tower = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.5, 2.5, 6), matSabotage);
+    tower.position.y = 1.25;
+    tower.castShadow = true;
+    group.add(tower);
+    // Warning sign
+    const sign = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.4, 0.05), new THREE.MeshLambertMaterial({ color: 0xFFEB3B }));
+    sign.position.set(0, 2.7, 0);
+    group.add(sign);
+    _addModeLabel(group, `💣 ${name || 'Alvo'}`, 'rgba(255,87,34,0.6)');
+    return group;
+}
+
+function createTeamDepot(name, team) {
+    const group = new THREE.Group();
+    const mat = (team === 'alpha') ? matBaseAlpha : matBaseBeta;
+    // Depot box
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.5, 1.2, 1.5), mat);
+    box.position.y = 0.6;
+    box.castShadow = true;
+    group.add(box);
+    // Lock
+    const lock = new THREE.Mesh(new THREE.SphereGeometry(0.2), matGold);
+    lock.position.set(0, 1.2, 0.76);
+    group.add(lock);
+    const icon = team === 'alpha' ? '🔵' : '🔴';
+    _addModeLabel(group, `${icon} ${name || 'Depósito'}`, team === 'alpha' ? 'rgba(33,150,243,0.5)' : 'rgba(244,67,54,0.5)');
+    return group;
+}
+
 function createTrophy() {
     const group = new THREE.Group();
     const base = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.2, 0.5), matStone);
@@ -831,6 +1127,28 @@ function updateWorld(data) {
     if (!data.game_over) {
         document.getElementById("tick-counter").textContent = data.ticks;
     }
+    // Atualizar badge de modo ativo (topo + painel lateral)
+    if (data.game_mode) {
+        const modeColors = {
+            survival: { bg: 'rgba(99,102,241,0.25)', color: '#a5b4fc', border: 'rgba(99,102,241,0.4)' },
+            gincana:  { bg: 'rgba(251,191,36,0.2)',  color: '#fbbf24', border: 'rgba(251,191,36,0.4)' },
+            warfare:  { bg: 'rgba(239,68,68,0.2)',   color: '#f87171', border: 'rgba(239,68,68,0.4)'  },
+            economy:  { bg: 'rgba(16,185,129,0.2)',  color: '#34d399', border: 'rgba(16,185,129,0.4)' },
+            gangwar:  { bg: 'rgba(168,85,247,0.2)',  color: '#c084fc', border: 'rgba(168,85,247,0.4)' },
+            hybrid:   { bg: 'rgba(245,158,11,0.2)',  color: '#fb923c', border: 'rgba(245,158,11,0.4)' },
+        };
+        const modeIcons = { survival:'🌴', gincana:'🏁', warfare:'⚔️', economy:'💰', gangwar:'💣', hybrid:'🔥' };
+        const c = modeColors[data.game_mode] || modeColors.survival;
+        const icon = modeIcons[data.game_mode] || '🎮';
+        const label = `${icon} ${data.game_mode}`;
+        [document.getElementById('game-mode-badge'), document.getElementById('sidebar-mode-badge')].forEach(el => {
+            if (!el) return;
+            el.textContent = label;
+            el.style.background = c.bg;
+            el.style.color = c.color;
+            el.style.border = `1px solid ${c.border}`;
+        });
+    }
     // Update day/night cycle
     if (data.day_cycle !== undefined) {
         currentDayCycle = data.day_cycle;
@@ -987,6 +1305,26 @@ function updateWorld(data) {
                 mesh = createHouse(entity.name, houseColor, rotation);
             }
             else if (entity.type === "cemetery") mesh = createCemeteryArea();
+            // ── Gincana (F12) ──
+            else if (entity.type === "checkpoint") mesh = createCheckpoint(entity.name);
+            else if (entity.type === "artifact") mesh = createArtifact(entity.name);
+            else if (entity.type === "delivery_marker") mesh = createDeliveryMarker(entity.name);
+            // ── Warfare (F13–F16) ──
+            else if (entity.type === "team_base") mesh = createTeamBase(entity.name, entity.team);
+            else if (entity.type === "control_zone") mesh = createControlZone(entity.name);
+            else if (entity.type === "supply_crate") mesh = createSupplyCrate(entity.name);
+            else if (entity.type === "ammo_cache") mesh = createAmmoCache(entity.name);
+            else if (entity.type === "throwable_stone") mesh = createThrowableStone();
+            else if (entity.type === "cover") mesh = createCover(entity.name);
+            // ── Economy (F17–F19) ──
+            else if (entity.type === "market_post") mesh = createMarketPost(entity.name);
+            else if (entity.type === "storage_box") mesh = createStorageBox(entity.name);
+            else if (entity.type === "trade_order") mesh = createTradeBoard(entity.name);
+            else if (entity.type === "contract_item") mesh = createContractItem(entity.name);
+            // ── Hybrid/GangWar (F20) ──
+            else if (entity.type === "black_market") mesh = createBlackMarket(entity.name);
+            else if (entity.type === "sabotage_target") mesh = createSabotageTarget(entity.name);
+            else if (entity.type === "team_inventory_depot") mesh = createTeamDepot(entity.name, entity.team);
             
             if (mesh) {
                 mesh.position.set(pos.x, 0, pos.z);
@@ -1434,7 +1772,7 @@ function applyCameraMode(save = true) {
     if (isFixedCamera) {
         // Redundant but keeping structure
         controls.enabled = false;
-        camera.position.set(WORLD_SIZE, 30, WORLD_SIZE + 10);
+        camera.position.set(WORLD_SIZE, WORLD_CAMERA_HEIGHT, WORLD_SIZE + WORLD_CAMERA_DISTANCE);
         controls.target.set(WORLD_SIZE, 0, WORLD_SIZE);
         camera.lookAt(WORLD_SIZE, 0, WORLD_SIZE);
     } else {
@@ -1527,3 +1865,309 @@ checkOpeningScreenState();
 
 animate();
 renderer.domElement.addEventListener('click', handleWorldClick);
+
+// ═══════════════════════════════════════════════════════════════════════
+// F01 — Modo Comandante por Linguagem Natural
+// ═══════════════════════════════════════════════════════════════════════
+
+let commanderModal = null;
+let commanderAgentId = null;
+
+function openCommanderModal(agentId, agentName) {
+    commanderAgentId = agentId;
+    // Remove modal antigo se existir
+    if (commanderModal) commanderModal.remove();
+
+    commanderModal = document.createElement('div');
+    commanderModal.style.cssText = `
+        position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
+        background: rgba(15, 15, 30, 0.97); border: 1px solid #4a9eff;
+        border-radius: 12px; padding: 24px; z-index: 9999;
+        width: 360px; box-shadow: 0 0 30px rgba(74,158,255,0.4);
+        font-family: system-ui, sans-serif; color: white;
+    `;
+    commanderModal.innerHTML = `
+        <h3 style="margin:0 0 8px; color:#4a9eff;">🎮 Modo Comandante</h3>
+        <p style="margin:0 0 16px; font-size:0.85em; color:#aaa;">Agente: <strong style="color:white">${agentName}</strong></p>
+        <textarea id="cmd-input" placeholder="Ex: Vai buscar água no lago..." 
+            style="width:100%; height:80px; background:#1a1a2e; border:1px solid #333;
+                   color:white; border-radius:8px; padding:8px; resize:none; box-sizing:border-box; font-size:0.9em;"></textarea>
+        <div style="display:flex; gap:8px; margin-top:12px; align-items:center;">
+            <label style="font-size:0.8em; color:#aaa;">Duração (ticks):</label>
+            <input id="cmd-expire" type="number" value="30" min="5" max="200"
+                style="width:70px; background:#1a1a2e; border:1px solid #333; color:white; 
+                       border-radius:6px; padding:4px 8px; text-align:center;">
+        </div>
+        <div style="display:flex; gap:8px; margin-top:16px;">
+            <button onclick="sendAgentCommand()" 
+                style="flex:1; background:#4a9eff; color:white; border:none; 
+                       border-radius:8px; padding:10px; cursor:pointer; font-weight:600;">
+                📤 Enviar Comando
+            </button>
+            <button onclick="cancelAgentCommand()" 
+                style="flex:0.6; background:#444; color:#fff; border:none; 
+                       border-radius:8px; padding:10px; cursor:pointer;">
+                🔓 Liberar
+            </button>
+            <button onclick="closeCommanderModal()" 
+                style="flex:0.4; background:transparent; color:#aaa; border:1px solid #333; 
+                       border-radius:8px; padding:10px; cursor:pointer;">✕</button>
+        </div>
+        <div id="cmd-status" style="margin-top:10px; font-size:0.82em; min-height:18px; color:#aaa;"></div>
+    `;
+    document.body.appendChild(commanderModal);
+    setTimeout(() => document.getElementById('cmd-input')?.focus(), 100);
+}
+
+function closeCommanderModal() {
+    if (commanderModal) { commanderModal.remove(); commanderModal = null; }
+}
+
+async function sendAgentCommand() {
+    const input = document.getElementById('cmd-input')?.value?.trim();
+    const expire = parseInt(document.getElementById('cmd-expire')?.value) || 30;
+    if (!input || !commanderAgentId) return;
+    const statusEl = document.getElementById('cmd-status');
+    try {
+        const resp = await fetch(`${API_BASE_URL}/agents/${commanderAgentId}/command`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: input, expire_ticks: expire })
+        });
+        const data = await resp.json();
+        if (resp.ok) {
+            if (statusEl) statusEl.innerHTML = `<span style="color:#4eff91">✓ Comando enviado! Expira no tick ${data.expires_at_tick}</span>`;
+        } else {
+            if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Erro: ${data.detail}</span>`;
+        }
+    } catch(e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Falha na conexão</span>`;
+    }
+}
+
+async function cancelAgentCommand() {
+    if (!commanderAgentId) return;
+    await fetch(`${API_BASE_URL}/agents/${commanderAgentId}/command/cancel`, { method: 'POST' });
+    const statusEl = document.getElementById('cmd-status');
+    if (statusEl) statusEl.innerHTML = `<span style="color:#aaa">🔓 Agente liberado para autonomia.</span>`;
+}
+
+// Expõe globalmente para chamada no handleWorldClick
+window.openCommanderModal = openCommanderModal;
+
+// ═══════════════════════════════════════════════════════════════════════
+// F03 — Decision Inspector Panel
+// ═══════════════════════════════════════════════════════════════════════
+
+let inspectorPanel = null;
+let inspectorIntervalId = null;
+
+async function showDecisionInspector(agentId, agentName) {
+    // Remove painel antigo se existir
+    if (inspectorPanel) { inspectorPanel.remove(); clearInterval(inspectorIntervalId); }
+
+    inspectorPanel = document.createElement('div');
+    inspectorPanel.id = 'decision-inspector';
+    inspectorPanel.style.cssText = `
+        position: fixed; top: 60px; right: 10px;
+        background: rgba(10,10,20,0.96); border: 1px solid #6a4aff;
+        border-radius: 12px; padding: 16px; z-index: 8888;
+        width: 320px; max-height: 70vh; overflow-y: auto;
+        box-shadow: 0 0 24px rgba(106,74,255,0.35);
+        font-family: system-ui, sans-serif; color: white; font-size: 0.82em;
+    `;
+    inspectorPanel.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h4 style="margin:0; color:#9b6aff;">🔍 Inspector: <span style="color:white">${agentName}</span></h4>
+            <button onclick="closeInspectorPanel()" style="background:transparent; border:none; color:#aaa; cursor:pointer; font-size:1.1em;">✕</button>
+        </div>
+        <div id="inspector-content">Carregando...</div>
+    `;
+    document.body.appendChild(inspectorPanel);
+
+    async function refreshInspector() {
+        try {
+            const [decResp, memResp] = await Promise.all([
+                fetch(`${API_BASE_URL}/agents/${agentId}/decisions?n=5`),
+                fetch(`${API_BASE_URL}/agents/${agentId}/memory/relevant`)
+            ]);
+            const decisions = await decResp.json();
+            const memory = await memResp.json();
+            const content = document.getElementById('inspector-content');
+            if (!content) return;
+
+            let html = `<div style="margin-bottom:10px;">
+                <strong style="color:#9b6aff;">💭 Últimas Decisões</strong>`;
+            const decs = decisions.decisions || [];
+            if (decs.length === 0) {
+                html += `<p style="color:#666;">Nenhuma decisão registrada ainda.</p>`;
+            } else {
+                decs.slice().reverse().forEach(d => {
+                    const color = d.result === 'success' ? '#4eff91' : (d.result === 'invalid' ? '#ff6b6b' : '#aaa');
+                    html += `<div style="border-left:2px solid ${color}; padding:4px 8px; margin:4px 0; background:rgba(255,255,255,0.04); border-radius:0 6px 6px 0;">
+                        <div style="color:#ccc;">T${d.tick} — <em>${d.action}</em></div>
+                        <div style="color:#888; font-size:0.9em;">${(d.thought||'').substring(0,80)}${d.thought?.length>80?'...':''}</div>
+                        <div style="color:#666; font-size:0.8em;">${d.latency_ms?.toFixed(0)||0}ms · ${(d.prompt_tokens||0)+(d.completion_tokens||0)} tokens</div>
+                    </div>`;
+                });
+            }
+            html += `</div>`;
+
+            html += `<div style="margin-bottom:10px; padding-top:8px; border-top:1px solid #222;">
+                <strong style="color:#9b6aff;">🧠 Tokens</strong>
+                <div style="margin-top:4px;">
+                    <span style="color:#4a9eff">${memory.tokens_used?.toLocaleString()}</span>
+                    / ${memory.token_budget?.toLocaleString()} tokens usados
+                </div>
+                <div style="background:#1a1a2e; border-radius:4px; height:6px; margin-top:4px; overflow:hidden;">
+                    <div style="background:#4a9eff; height:100%; width:${Math.min(100,(memory.tokens_used/memory.token_budget*100)||0)}%;"></div>
+                </div>
+            </div>`;
+
+            const shortMem = memory.short_term || [];
+            if (shortMem.length > 0) {
+                html += `<div style="padding-top:8px; border-top:1px solid #222;">
+                    <strong style="color:#9b6aff;">📍 Memória Recente</strong>`;
+                shortMem.slice(-3).reverse().forEach(m => {
+                    html += `<div style="color:#888; margin:3px 0; padding:3px 6px; background:rgba(255,255,255,0.03); border-radius:4px;">T${m.tick}: ${(m.thought||m.action||'').substring(0,60)}</div>`;
+                });
+                html += `</div>`;
+            }
+
+            content.innerHTML = html;
+        } catch(e) {
+            const content = document.getElementById('inspector-content');
+            if (content) content.innerHTML = `<span style="color:#ff4d4d">Erro ao carregar dados</span>`;
+        }
+    }
+
+    await refreshInspector();
+    inspectorIntervalId = setInterval(refreshInspector, 3000);
+}
+
+function closeInspectorPanel() {
+    if (inspectorPanel) { inspectorPanel.remove(); inspectorPanel = null; }
+    clearInterval(inspectorIntervalId);
+}
+
+window.showDecisionInspector = showDecisionInspector;
+
+// ═══════════════════════════════════════════════════════════════════════
+// F05 — Painel Admin Console
+// ═══════════════════════════════════════════════════════════════════════
+
+let adminPanel = null;
+
+function toggleAdminPanel() {
+    if (adminPanel) { adminPanel.remove(); adminPanel = null; return; }
+    adminPanel = document.createElement('div');
+    adminPanel.id = 'admin-console-panel';
+    adminPanel.style.cssText = `
+        position: fixed; bottom: 70px; right: 10px;
+        background: rgba(20,10,10,0.97); border: 1px solid #ff4d4d;
+        border-radius: 12px; padding: 16px; z-index: 8777;
+        width: 300px; box-shadow: 0 0 24px rgba(255,77,77,0.3);
+        font-family: system-ui, sans-serif; color: white; font-size: 0.82em;
+    `;
+    adminPanel.innerHTML = `
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+            <h4 style="margin:0; color:#ff4d4d;">🔧 Console Admin</h4>
+            <button onclick="toggleAdminPanel()" style="background:transparent; border:none; color:#aaa; cursor:pointer;">✕</button>
+        </div>
+        <div style="margin-bottom:10px;">
+            <strong style="color:#ff4d4d; font-size:0.9em;">⚡ Eventos Globais</strong>
+            <div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;">
+                ${['tempestade','seca','suprimentos','radio','eclipse'].map(ev => `
+                    <button onclick="adminTriggerEvent('${ev}')"
+                        style="background:#2a1010; border:1px solid #ff4d4d; color:#ff9999;
+                               border-radius:6px; padding:5px 10px; cursor:pointer; font-size:0.82em;">
+                        ${ev === 'tempestade' ? '⛈️' : ev === 'seca' ? '🌵' : ev === 'suprimentos' ? '📦' : ev === 'radio' ? '📻' : '🌑'} ${ev}
+                    </button>`).join('')}
+            </div>
+        </div>
+        <div style="border-top:1px solid #333; padding-top:10px; margin-bottom:10px;">
+            <strong style="color:#ff4d4d; font-size:0.9em;">🧱 Spawnar Objeto</strong>
+            <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:6px; margin-top:6px;">
+                <input id="spawn-type" placeholder="tipo" value="supply_crate"
+                    style="grid-column:1/-1; background:#1a0000; border:1px solid #333; color:white; 
+                           border-radius:6px; padding:5px 8px;">
+                <input id="spawn-x" type="number" placeholder="X" value="16"
+                    style="background:#1a0000; border:1px solid #333; color:white; border-radius:6px; padding:5px 8px;">
+                <input id="spawn-y" type="number" placeholder="Y" value="16"
+                    style="background:#1a0000; border:1px solid #333; color:white; border-radius:6px; padding:5px 8px;">
+                <button onclick="adminSpawnObject()"
+                    style="background:#ff4d4d; color:white; border:none; border-radius:6px; padding:5px 8px; cursor:pointer;">
+                    + Spawnar
+                </button>
+            </div>
+        </div>
+        <div id="admin-status" style="font-size:0.8em; color:#aaa; min-height:18px;"></div>
+    `;
+    document.body.appendChild(adminPanel);
+}
+
+async function adminTriggerEvent(eventType) {
+    const statusEl = document.getElementById('admin-status');
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/event`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+            body: JSON.stringify({ event_type: eventType })
+        });
+        const data = await resp.json();
+        if (resp.ok && statusEl) statusEl.innerHTML = `<span style="color:#4eff91">✓ ${data.message.substring(0,60)}</span>`;
+        else if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ ${data.detail || 'Erro'}</span>`;
+    } catch(e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Falha</span>`;
+    }
+}
+
+async function adminSpawnObject() {
+    const type = document.getElementById('spawn-type')?.value?.trim() || 'stone';
+    const x = parseInt(document.getElementById('spawn-x')?.value) || 16;
+    const y = parseInt(document.getElementById('spawn-y')?.value) || 16;
+    const statusEl = document.getElementById('admin-status');
+    try {
+        const resp = await fetch(`${API_BASE_URL}/admin/spawn`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+            body: JSON.stringify({ type, x, y })
+        });
+        const data = await resp.json();
+        if (resp.ok && statusEl) statusEl.innerHTML = `<span style="color:#4eff91">✓ ${type} criado em (${x},${y})</span>`;
+        else if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ ${data.detail}</span>`;
+    } catch(e) {
+        if (statusEl) statusEl.innerHTML = `<span style="color:#ff4d4d">✗ Falha</span>`;
+    }
+}
+
+window.toggleAdminPanel = toggleAdminPanel;
+window.adminTriggerEvent = adminTriggerEvent;
+window.adminSpawnObject = adminSpawnObject;
+window.closeCommanderModal = closeCommanderModal;
+window.closeInspectorPanel = closeInspectorPanel;
+
+// ═══════════════════════════════════════════════════════════════════════
+// Atualizar resetGame para suportar game_mode
+// ═══════════════════════════════════════════════════════════════════════
+
+window.resetGameWithMode = async function(count, gameMode) {
+    const playerCount = count || document.getElementById('player-count-selector')?.value || 4;
+    const mode = gameMode || document.getElementById('game-mode-selector')?.value || 'survival';
+    try {
+        const response = await fetch(`${API_BASE_URL}/reset`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Admin-Token': adminToken },
+            body: JSON.stringify({ player_count: parseInt(playerCount), game_mode: mode })
+        });
+        if (response.ok) {
+            chatHistory = [];
+            localStorage.removeItem('bbb_chat_history');
+            renderChat();
+        } else if (response.status === 401) {
+            alert("Não autorizado. Verifique seu Admin Token.");
+        }
+    } catch (e) {
+        console.error("Reset failed", e);
+    }
+};

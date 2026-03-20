@@ -77,8 +77,9 @@ class Thinker:
         adapter = self.get_adapter(profile)
 
         # 3. Montar prompts
-        system_prompt = self._build_system_prompt(agent)
-        user_context = self._build_user_context(agent, world_context, current_tick)
+        game_mode = getattr(agent, '_game_mode', 'survival')
+        system_prompt = self._build_system_prompt(agent, game_mode)
+        user_context = self._build_user_context(agent, world_context, current_tick, game_mode)
 
         # 4. Chamar IA
         try:
@@ -172,20 +173,96 @@ class Thinker:
 
     # ── Prompt builders ─────────────────────────────────────────────────────
 
-    def _build_system_prompt(self, agent) -> str:
-        """Constrói o system prompt incluindo o schema JSON (T11)."""
+    # ── Descrições por modo ──────────────────────────────────────────────────
+    MODE_DESCRIPTIONS = {
+        "survival": (
+            "sobrevivência na ilha. Encontre comida (colha frutas das árvores), "
+            "beba água (vá até o lago), mantenha sua saúde e sobreviva à noite. "
+            "Se alguém morrer, leve o corpo ao cemitério."
+        ),
+        "warfare": (
+            "GUERRA DE FACÇÕES (Alpha vs Beta). VOCÊ DEVE LUTAR! "
+            "Ataque inimigos da facção oposta com 'attack'. "
+            "Pegue pedras arremessáveis ('throwable_stone') e use a ação 'throw' para causar dano AOE. "
+            "Vá até a Zona Central e use 'capture_zone' para capturá-la (3 ticks seguidos). "
+            "Defenda sua base. O objetivo é ter mais pontos que a facção inimiga. "
+            "PRIORIZE combate e captura de zona acima de sobrevivência!"
+        ),
+        "gincana": (
+            "GINCANA COOPERATIVA em equipe! "
+            "Trabalhe com os outros agentes para visitar TODOS os 4 checkpoints usando 'move_to'. "
+            "Depois, encontre o Artefato Principal e leve-o até a Zona de Entrega. "
+            "Conversem, coordenem quem vai para qual checkpoint! "
+            "PRIORIZE cooperação e velocidade sobre sobrevivência."
+        ),
+        "economy": (
+            "ECONOMIA e COMÉRCIO. Seu objetivo é ganhar dinheiro! "
+            "Vá até os Mercados e use 'buy' ou 'sell' para negociar items. "
+            "Complete contratos entregando os itens pedidos para ganhar moedas. "
+            "Use 'craft' para fabricar itens valiosos (precisa de materiais no inventário). "
+            "Use 'trade' para propor trocas diretas com outros agentes. "
+            "PRIORIZE lucro e negociação sobre sobrevivência!"
+        ),
+        "gangwar": (
+            "GUERRA DE GANGUES! Modo híbrido de guerra + economia clandestina. "
+            "Use o Mercado Negro para comprar itens especiais ('buy'). "
+            "Use 'sabotage' nos depósitos da facção inimiga para destruir seus recursos. "
+            "Capture supply posts com 'supply' para gerar renda passiva. "
+            "Ataque inimigos, defenda seus recursos! PRIORIZE combate e sabotagem!"
+        ),
+        "hybrid": (
+            "MODO HÍBRIDO: guerra de gangues + economia. "
+            "Combine estratégias de combate E economia. "
+            "Use o Mercado Negro, sabote o inimigo, capture supply posts, "
+            "e tente dominar tanto militarmente quanto economicamente!"
+        ),
+    }
+
+    MODE_TIPS = {
+        "warfare": [
+            "Se há um inimigo perto, ATAQUE com 'attack' ou 'throw'.",
+            "Se ninguém está na Zona Central, vá capturá-la com 'capture_zone'.",
+            "'throw' causa dano em área (raio 1) — eficaz contra grupos.",
+            "Scouts se movem mais rápido, Medics curam aliados, Warriors causam mais dano.",
+        ],
+        "gincana": [
+            "Comunique-se: diga aos outros qual checkpoint você vai pegar.",
+            "Divida os checkpoints: cada agente pega um diferente.",
+            "Quando todos os checkpoints estiverem capturados, vá buscar o artefato.",
+        ],
+        "economy": [
+            "Colha frutas e venda no Mercado por moedas.",
+            "Verifique os contratos disponíveis — eles dão boas recompensas.",
+            "Negocie com outros agentes: 'trade target_name=João' para propor troca.",
+        ],
+        "gangwar": [
+            "O Mercado Negro vende itens poderosos mas caros.",
+            "Sabote depósitos inimigos para enfraquecer a facção adversária.",
+            "Supply posts geram renda passiva — capture-os!",
+        ],
+    }
+
+    def _build_system_prompt(self, agent, game_mode: str = "survival") -> str:
+        """Constrói o system prompt variando por modo de jogo."""
         base_instruction = getattr(agent, "system_instruction", None)
         if base_instruction:
             return base_instruction
 
+        mode_desc = self.MODE_DESCRIPTIONS.get(game_mode, self.MODE_DESCRIPTIONS["survival"])
+        tips = self.MODE_TIPS.get(game_mode, [])
+        tips_text = ""
+        if tips:
+            tips_text = "\n\nDICAS IMPORTANTES:\n" + "\n".join(f"• {t}" for t in tips)
+
         from .schemas import ActionDecision
-        return f"""Você é {agent.name}, um personagem em uma simulação de sobrevivência.
+        return f"""Você é {agent.name}, um personagem em uma simulação de {mode_desc}
 Sua personalidade: {agent.personality}
+{tips_text}
 
-{ActionDecision.get_json_schema_prompt()}"""
+{ActionDecision.get_json_schema_prompt(game_mode)}"""
 
-    def _build_user_context(self, agent, world_context: dict, tick: int) -> str:
-        """Constrói o contexto do usuário integrando a memória 4 camadas (T10)."""
+    def _build_user_context(self, agent, world_context: dict, tick: int, game_mode: str = "survival") -> str:
+        """Constrói o contexto do usuário integrando memória + estado do modo."""
         # Pega o contexto de memória se disponível
         memory_ctx = ""
         agent_memory = getattr(agent, "agent_memory", None)
@@ -206,10 +283,57 @@ Sua personalidade: {agent.personality}
                 f"🎯 EPISÓDIOS MAIS RELEVANTES AGORA:\n{relevant_episodes}\n"
             )
 
+        # ── Contexto específico do modo ──
+        mode_ctx = ""
+        if game_mode == "warfare":
+            wf = world_context.get("warfare_info", {})
+            if wf:
+                mode_ctx = f"""
+🎖️ MODO WARFARE — INFORMAÇÕES DE COMBATE:
+SUA FACÇÃO: {wf.get('faction', '?').upper()}
+SEU PAPEL: {wf.get('role', '?')} (scout=rápido, medic=cura, warrior=forte)
+PONTUAÇÃO: Alpha={wf.get('alpha_score', 0):.0f} vs Beta={wf.get('beta_score', 0):.0f}
+BASES HP: Alpha={wf.get('alpha_base_hp', 100):.0f} | Beta={wf.get('beta_base_hp', 100):.0f}
+ZONA CENTRAL: controlada por {wf.get('territory_holder') or 'NINGUÉM'} (capture_ticks={wf.get('territory_ticks', 0)})
+ARREMESSOS FEITOS: {wf.get('throws', 0)}
+"""
+        elif game_mode == "gincana":
+            gin = world_context.get("gincana_info", {})
+            if gin:
+                cps = gin.get('checkpoints_status', 'desconhecido')
+                mode_ctx = f"""
+🏁 MODO GINCANA — INFORMAÇÕES DA CORRIDA:
+CHECKPOINTS CAPTURADOS: {cps}
+ARTEFATO COLETADO: {'SIM' if gin.get('artifact_collected') else 'NÃO — vá buscá-lo!'}
+ENTREGA FEITA: {'SIM ✓' if gin.get('delivery_done') else 'NÃO — leve o artefato à Zona de Entrega!'}
+TICKS RESTANTES: {gin.get('remaining_ticks', '?')}
+"""
+        elif game_mode == "economy":
+            eco = world_context.get("economy_info", {})
+            if eco:
+                mode_ctx = f"""
+💰 MODO ECONOMIA — INFORMAÇÕES COMERCIAIS:
+SEU SALDO: {eco.get('balance', 0)} moedas
+RECEITAS DISPONÍVEIS: {eco.get('recipes', 'axe, raft, wall, torch, bandage')}
+MERCADO: {eco.get('market_summary', 'verifique no Mercado Central')}
+CONTRATOS ATIVOS: {eco.get('contracts_count', 0)}
+"""
+        elif game_mode in ("gangwar", "hybrid"):
+            gw = world_context.get("gangwar_info", {})
+            if gw:
+                mode_ctx = f"""
+💣 MODO GUERRA DE GANGUES — INFORMAÇÕES:
+SUA FACÇÃO: {gw.get('faction', '?').upper()}
+SCORE: {gw.get('faction_scores', 'desconhecido')}
+DEPÓSITOS: Alpha HP={gw.get('depot_alpha_hp', '?')} | Beta HP={gw.get('depot_beta_hp', '?')}
+MERCADO NEGRO: Disponível (use 'buy' perto dele)
+"""
+
         base = f"""
 TICK ATUAL: {tick}
 PERÍODO: {"🌙 NOITE" if world_context.get('is_night') else "☀️ DIA"}
-
+MODO DE JOGO: {game_mode.upper()}
+{mode_ctx}
 SEU STATUS:
 Posição: x={agent.x}, y={agent.y}
 ZUMBI: {"SIM!" if getattr(agent, 'is_zombie', False) else "NÃO"}

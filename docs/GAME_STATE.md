@@ -1,218 +1,151 @@
-# 🎮 Game State & Simulation Logic — BBBia: A Ilha da IA
+# Game State and Simulation Logic - BBBia
 
-> Documento técnico sobre a lógica de simulação, ciclo de jogo e estado do mundo.
+Atualizado em: 2026-03-18
 
----
+## Visao geral
 
-## O Mundo (Grid)
+Este documento descreve como o estado do mundo evolui por tick, como os modos alteram a simulacao e quais campos principais sao enviados para frontend/API.
 
-A ilha é um grid **20×20 tiles**. O sistema de coordenadas é `(x, y)` onde:
-- `(0, 0)` é o canto superior esquerdo
-- `(19, 19)` é o canto inferior direito
+## Mundo e grid
 
-### Pontos Fixos de Interesse
+O mundo usa grid dinamico por `game_mode`:
 
-| Local | Coordenada | Descrição |
-|-------|-----------|-----------|
-| Lago (centro) | ~`(10, 10)` | Radius 2.5 tiles de água |
-| Casa do João | `(2, 2)` | Abrigo azul |
-| Casa da Maria | `(17, 17)` | Abrigo vermelho |
-| Casa do Zeca | `(17, 2)` | Abrigo verde |
-| Casa da Elly | `(2, 17)` | Abrigo roxo |
-| Cemitério | `(15, 5)` | Enterro de corpos |
+- `survival`: 32x32
+- `gincana`: 32x32
+- `warfare`: 40x40
+- `economy`: 36x36
+- `gangwar`: 40x40
+- `hybrid`: 44x44
 
-### Geração de Recursos
+Landmarks (casas, lago e cemiterio) sao calculados em funcao de `world.size`.
 
-| Tipo | Probabilidade | Condição |
-|------|--------------|----------|
-| Pedra (stone) | 2% por tile | Qualquer tile não-lago |
-| Árvore (tree) | 1% por tile | Tiles a >20 dist² do lago |
+## Estrutura base de entidades
 
----
+Entidades sao armazenadas em `world.entities` (mapa `id -> objeto`).
 
-## Ciclo Dia/Noite
+Tipos base recorrentes:
 
-**Duração total:** 120 ticks por ciclo completo.
+- `agent`
+- `tree`, `stone`, `water`
+- `house`, `cemetery`
+- itens e objetos por modo (`checkpoint`, `control_zone`, `market_post`, `black_market`, etc.)
 
-| Fase | Ticks (mod 120) | Evento |
-|------|-----------------|--------|
-| ☀️ Dia | 0–79 | Normal. Zumbis ao sol são destruídos se fora de casa |
-| 🌅 Entardecer | 70–79 | Transição visual |
-| 🌙 Noite | 80–109 | Frio fora de casa (-2 HP/tick), mortos podem virar zumbi |
-| 🌄 Amanhecer | 110–119 | Transição visual |
+## Vitals e ciclo de vida de agentes
 
-**Relógio fictício:** 1 tick = 12 minutos. Começa às 04:00.
+Campos principais por agente:
 
----
+- `hp`, `hunger`, `thirst`
+- `is_alive`, `is_zombie`
+- `profile_id`
+- `tokens_used`, `token_budget`
+- dados sociais/missao conforme feature
 
-## Vitais dos Agentes
+Eventos de morte e zumbi continuam no loop base, com regras de dia/noite e seguranca por abrigo.
 
-| Vital | Faixa | Decay/tick | Efeito em 0 |
-|-------|-------|-----------|-------------|
-| `hunger` | 0–100 | -1 a -2 (random) | Perde HP |
-| `thirst` | 0–100 | -1 a -3 (random) | Perde HP |
-| `hp` | 0–100 | Varia | Morte ao chegar a 0 |
-| `friendship` | 0–100 | -1 a -2 (random) | Penalidade emocional |
+## Ciclo por tick (ordem simplificada)
 
-**Recuperação:** Se `hunger > 70` AND `thirst > 70`: `+1 a +2 HP/tick`
+1. Atualiza relogio da simulacao (`ticks`).
+2. Processa spawn pendente e interacoes automaticas.
+3. Executa decisoes de IA dos agentes elegiveis.
+4. Aplica regras base (vitals, dia/noite, miasma, etc.).
+5. Executa engines ativas por modo:
+   - `gincana`: checkpoints/artefato/timer
+   - `warfare`: faccoes/territorio/roles/combate
+   - `economy`: mercado/craft/contratos
+   - `gangwar` (`gangwar` e `hybrid`): depots/sabotagem/black market
+6. Gera eventos e transmite estado via WebSocket.
 
-**Bônus de carregar corpo:** Enquanto carrega um corpo, o agente tem vitals travados em 100, HP em 100 e amizade restaurada para 100 (altruísmo recompensado).
+## Estado retornado por `world.get_state()`
 
----
+Campos globais relevantes:
 
-## Sistema de Itens
+- `ticks`, `started`, `game_over`, `winner`
+- `size`, `game_mode`
+- `agents`, `entities`, `scores`
+- blocos por modo:
+  - `gincana` quando `game_mode == gincana`
+  - `warfare` quando `game_mode == warfare`
+  - `economy` sempre exposto
+  - `gangwar` quando `game_mode in (gangwar, hybrid)`
 
-| Item | Origem | Efeito |
-|------|--------|--------|
-| `fruit` | Árvore com `fruit_stage == 3` | `eat` → +80 hunger |
-| `water_bottle` | Lago (adjacente) | `drink` → thirst = 100 |
-| `dead_body` | Agente morto não enterrado | Carregado para cemitério |
+## Features e impacto no estado
 
-**Inventário:** Máximo 3 itens. Coleta automática ao passar pelo item.
+### F01/F03/F05 (comando, inspector, admin)
 
-**Reaparecimento de frutas:** A cada 80 ticks, `fruit_stage` sobe 1 (até máximo 3).
+- Comando humano em agente (`human_command`, expiracao).
+- Leitura de decisoes e memoria relevante por agente.
+- Mutacoes admin (spawn, patch de mundo, troca de perfil).
 
----
+### F04/F07/F08 (eventos, reputacao, missoes)
 
-## Sistema de Zumbis
+- Evento ativo com janela temporal e historico.
+- Aliancas e traicoes alterando reputacao.
+- Catalogo/progresso de missoes por agente.
 
-```
-Agente morre
-    │
-    └─► Corpo fica no chão (is_alive=false, is_buried=false)
-              │
-              ├─ Noite começa (tick%120 >= 80)
-              │       └─► Corpo não carregado → is_zombie = true
-              │               • Nome vira "Nome Zumbi"
-              │               • HP = 200, hunger/thirst = 100
-              │               • Comportamento controlado por IA (Gemini)
-              │               • Pode atacar: -20 HP por ataque
-              │
-              └─ Dia começa (tick%120 < 80)
-                      └─► Zumbi fora de casa → DESTRUÍDO (vira pó)
-                          Zumbi dentro de casa → sobrevive
-                              └─► Após 120 ticks como zumbi → CURADO
-                                  (volta humano com HP=100, hunger/thirst=50)
-```
+### F12 (gincana)
 
-**Miasma:** Se há algum corpo não enterrado, **todos os vivos** perdem 1-2 HP/tick.
+- placar por agente
+- dono de checkpoint
+- estado do artefato e entregas
+- timer e vencedor
 
-**Observação adicional:** o prompt atual dos agentes já instrui sobreviventes a buscarem abrigo e zumbis a tentarem sobreviver escondidos para se curar, o que reforça a "novela emergente" da ilha.
+### F13..F16 (warfare)
 
----
+- faccao por agente
+- role tatico por agente
+- zona de territorio e holder
+- placar por faccao
+- eventos de throw/combat
 
-## Sistema de Score & Benchmark (v0.5)
+### F10/F17/F18/F19 (economia)
 
-### Scoreboard SQLite (multi-sessão)
-Cada agente tem sua entrada em `agent_scores` (SQLite WAL) atualizada por sessão.
+- moedas por agente
+- receitas de crafting
+- precos e estoque de mercado
+- contratos abertos/cumpridos
+- reputacao comercial
 
-| Campo | Descrição |
-|-------|-----------|
-| `agent_name` | Nome do agente |
-| `model` | Modelo de IA usado |
-| `profile_id` | Perfil de execucao do agente (ex.: `claude-kiro`, `kimi-thinking`) |
-| `score_total` | Pontuação acumulada |
-| `tokens_used` | Total de tokens consumidos |
-| `cost_usd` | Custo estimado em dólares |
-| `decisions_made` | Total de decisões IA tomadas |
+### F20 (gangwar/hybrid)
 
-### Critérios de Score
-| Ação | Pontos |
-|------|--------|
-| Comer fruta | +1 (`apples_eaten`) |
-| Beber água | +1 (`water_drunk`) |
-| Falar/Chat | +1 (`chats_sent`) |
-| Sobreviver uma noite | Bônus implícito (mais ticks = mais oportunidades) |
+- gangue por agente
+- score por gangue
+- estado dos depots e lock por sabotagem
+- black market (precos/estoque)
 
-### Benchmark do Agente (em memória)
-Cada `Agent` mantém um dict `benchmark` com métricas ao vivo:
+## Passo a passo para validar estado por modo
 
-```python
-agent.benchmark = {
-    "score": 0.0,
-    "decisions_made": 0,
-    "tokens_used": 0,
-    "cost_usd": 0.0,
-    "latency_ms_avg": 0.0,
-    "invalid_actions": 0,
-}
-```
+### Survival
 
-### Export
-- `GET /world/scoreboard/export?format=csv` — CSV com 200+ entradas
-- `GET /sessions/{id}/decisions/export?format=csv` — NDJSON decisions como CSV
+1. `POST /reset` com `game_mode=survival`.
+2. `GET /system/info` e `GET /agents/all`.
+3. Observar `update` no WebSocket.
 
----
+### Gincana
 
-## Pathfinding (BFS)
+1. `POST /reset` com `game_mode=gincana`.
+2. `POST /modes/gincana/start`.
+3. `GET /gincana/state` e acompanhar `events`.
 
-O mundo usa **BFS (Breadth-First Search)** para pathfinding:
-- Suporta **8 direções** (incluindo diagonais)
-- Obstáculos: `tree`, `stone`, `water`, `agent` vivo
-- Destinos inalcançáveis (ex: lago): chega **adjacente** (dist ≤ 1)
-- Sem heurística (A*): O(n²) por busca, adequado para grid 20x20
+### Warfare
 
----
+1. `POST /reset` com `game_mode=warfare`.
+2. `POST /modes/warfare/start`.
+3. `GET /warfare/state`, `/warfare/territory`, `/teams/{team}/roles`.
 
-## Sistema de Decisão da IA
+### Economy
 
-O motor suporta dois modos:
+1. `POST /reset` com `game_mode=economy`.
+2. `POST /modes/economy/start`.
+3. `GET /economy/state`, `/market/prices`, `/contracts`.
 
-1. **Turn-based** (`ai_interval > 0`)  
-   Um agente elegível pensa a cada `N` ticks.
+### Gangwar/Hybrid
 
-2. **Paralelo** (`ai_interval = 0`)  
-   Todos os agentes elegíveis podem pensar a cada tick.
+1. `POST /reset` com `game_mode=gangwar` ou `hybrid`.
+2. `POST /gangwar/start` (ou `/modes/hybrid/start`).
+3. `GET /gangwar/state` (ou `/modes/hybrid/state`).
 
-Um agente **não é consultado pela IA** quando:
-- Está morto
-- É remoto (`is_remote=True`)
-- Já está caminhando automaticamente para um destino
-- Acabou de chegar ao destino no tick atual
-- Já está aguardando resposta da IA (`thinking_agents`)
+## Referencias
 
-Esse detalhe é importante porque o custo real da simulação depende mais da elegibilidade do agente do que apenas do valor bruto do tick loop.
-
----
-
-## Percepção do Agente
-
-O contexto usado pela IA inclui:
-- `visible_entities` — entidades visíveis na vizinhança
-- `reachable_now` — recursos/ações imediatamente alcançáveis
-- `inventory`
-- `is_night`
-- `is_carrying_body`
-- `carrying_name`
-- destino automático atual (`is_moving_automatically_to`)
-
-**Alcance visual atual:** até distância Manhattan ~12 para entidades relevantes.
-
-Isso ajuda a explicar por que a IA às vezes "sabe" sobre corpos, lago, cemitério ou outros agentes sem enxergar o mapa inteiro.
-
----
-
-## Auto-Interações por Proximidade
-
-A cada tick, agentes vivos automaticamente:
-
-1. **Coleta fruta** — Se inventário < 3 e árvore madura adjacente
-2. **Enche garrafa** — Se inventário < 3 e sem garrafa e lago adjacente  
-3. **Pega corpo** — Se inventário < 3 e não carrega corpo e corpo morto adjacente
-4. **Enterra corpo** — Se está carregando corpo e está no cemitério
-
----
-
-## Reset Automático
-
-Após `game_over`, o mundo aguarda **120 ticks (2 minutos)** e então reinicia automaticamente, mantendo scores e hall of fame.
-
----
-
-## Spawn de Novos Agentes
-
-Quando um agente é enterrado ou um zumbi é destruído:
-- Um novo agente da lista `extra_names` (Beto, Carla, Dudu, Eva, Fabio, Gabi) é spawned após **10 ticks**.
-- Mantém a ilha sempre com agentes ativos.
-
-**Observação:** esse comportamento já é uma boa base para futuros papéis/skills por persona, porque o pipeline de entrada de novos agentes já existe.
+- `docs/API_REFERENCE.md`
+- `docs/ARCHITECTURE.md`
+- `docs/DEVELOPMENT_GUIDE.md`

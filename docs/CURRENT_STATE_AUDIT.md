@@ -1,105 +1,71 @@
-# Current State Audit — BBBia v0.6 (feature-diego)
+# Current State Audit - BBBia
 
-> Auditoria: Março 2026 | Branch: feature-diego
+Atualizado em: 2026-03-18
 
----
+## Resumo executivo
 
-## Status Geral: ✅ Operacional
+Status geral do backend: operacional e consistente com o plano F01..F20.
 
----
+Evidencias desta auditoria:
 
-## Backend
+- Testes backend: `200 passed, 1 skipped`
+- Contratos de endpoint das features: `ALL_FEATURE_ENDPOINT_CONTRACTS_COVERED`
+- API reference global atualizada
+- Cobertura de integracao no frontend oficial concluida (`48/48` endpoints contratuais)
 
-| Módulo | Status | Observação |
-|--------|--------|-----------|
-| `main.py` | ✅ | 30+ endpoints REST + WebSocket + StaticFiles |
-| `world.py` | ✅ | Motor 20×20, ciclo dia/noite, torneios, campos de catálogo de IA |
-| `agent.py` | ✅ | Vitals, budget, 4 camadas de memória, profile_id |
-| `runtime/thinker.py` | ✅ | OpenAICompatibleAdapter, can_think(), logging |
-| `runtime/profiles.py` | ✅ | 7 perfis free-first via OmniRoute |
-| `backend/runtime/adapters/openai_compatible.py` | ✅ | Adapter único para qualquer endpoint OpenAI-compat |
-| `runtime/memory.py` | ✅ | AgentMemory 4 camadas |
-| `runtime/relevance.py` | ✅ | TF-IDF + decaimento temporal |
-| `runtime/tournament_runner.py` | ✅ | Auto-finalização, leaderboard, webhook |
-| `storage/session_store.py` | ✅ | SQLite WAL — sessões e scoreboard |
-| `storage/decision_log.py` | ✅ | NDJSON por sessão |
-| `storage/replay_store.py` | ✅ | Snapshots a cada 5 ticks |
-| `storage/memory_store.py` | ✅ | Memória persistente entre sessões |
-| `storage/webhook_manager.py` | ✅ | HMAC + fire_count |
+## Backend - estado por bloco
 
----
+| Bloco | Status | Evidencia |
+|---|---|---|
+| Fundacao P00 (mundo expandido + modos) | Concluido | `World.MODE_SIZES` e reset por `game_mode` |
+| F01/F03/F05 | Concluido | endpoints + testes + UI operacional |
+| F02/F06/F09 | Concluido no backend | endpoints ativos, persistencia em store |
+| F04/F07/F08 | Concluido no backend | eventos, aliancas, missoes |
+| F12 | Concluido | `GincanaEngine` + templates/estado |
+| F13..F16 | Concluido | `WarfareEngine` + throw/roles/territorio |
+| F10/F17/F18/F19 | Concluido | `EconomyEngine` + mercado/contratos |
+| F20 | Concluido | `GangWarEngine` + aliases hybrid |
+| F11 | Concluido | Webhook manager expandido + stats/history |
 
-## Frontend
+## Frontend - estado atual
 
-| Arquivo | Status | Observação |
-|---------|--------|-----------|
-| `index.html` | ✅ | Observer 3D + sidebar + nav global + modal de catálogo IA |
-| `dashboard.html` | ✅ | KPIs + gráficos + scoreboard + export + nav |
-| `models.html` | ✅ | Perfis dinâmicos + testes + agentes + registro + nav |
-| `main.js` | ✅ | Three.js, WebSocket, HUD, modal de agente, catálogo IA |
-| `benchmark.js` | ✅ | Benchmark HUD (arrastável, colapsável), replay, timeline |
-| `style.css` | ✅ | CSS da ilha + nav global + sidebar + modal de catálogo |
+Telas oficiais:
 
----
+- `frontend/index.html`
+- `frontend/dashboard.html`
+- `frontend/models.html`
 
-## Configuração de Modelos
+Estado observado:
 
-| Perfil | Modelo | Testado | Observação |
-|--------|--------|---------|-----------|
-| `claude-kiro` | `kr/claude-sonnet-4.5` | ✅ | Padrão — grátis, ilimitado |
-| `claude-haiku` | `kr/claude-haiku-4.5` | ✅ | Rápido — grátis, ilimitado |
-| `kimi-thinking` | `if/kimi-k2` | ✅ | Grátis, ilimitado |
-| `qwen-coder` | `if/qwen3-coder-plus` | ⚠️ | Grátis, a testar |
-| `kimi-groq` | `groq/moonshotai/kimi-k2-instruct` | ✅ | Grátis, 30 RPM |
-| `gemini-flash` | `gc/gemini-2.5-flash` | ⚠️ | Sujeito a rate limit de conta |
-| `llama-groq` | `groq/llama-3.3-70b-versatile` | ✅ | Grátis, 30 RPM |
+- A aba `Feature Ops` em `frontend/models.html` cobre operacoes de F01..F20.
+- Resultado de varredura de contratos: `48/48` endpoints encontrados no frontend.
+- Pendencia aberta nesta camada: QA funcional formal (desktop/mobile) com evidencias.
 
----
+Referencia detalhada:
 
-## 4 NPCs da Ilha
+- `docs/features/FRONTEND_ENDPOINT_COVERAGE_2026-03-18.md`
 
-| NPC | Perfil | Modelo |
-|-----|--------|--------|
-| João | `claude-kiro` | `kr/claude-sonnet-4.5` |
-| Maria | `kimi-thinking` | `if/kimi-k2` |
-| Zeca | `kimi-groq` | `groq/moonshotai/kimi-k2-instruct` |
-| Elly | `claude-haiku` | `kr/claude-haiku-4.5` |
+## Persistencia e dados
 
----
+- SQLite WAL em `backend/data/ilhadaia.db`.
+- Replay NDJSON em `backend/data/replays/`.
+- Decision logs NDJSON em `backend/logs/`.
+- Memoria persistente via `memory_store`.
 
-## Endpoints Novos (feature-diego)
+## Principais riscos remanescentes
 
-| Endpoint | Status |
-|----------|--------|
-| `GET /settings/ai` | ✅ |
-| `POST /settings/ai` | ✅ |
-| `GET /models` | ✅ |
-| `GET /profiles` | ✅ (já era, agora com 7 perfis) |
+1. QA manual desktop/mobile ainda nao executado no fechamento final.
+2. Observabilidade de produto por feature ainda parcial no dashboard.
 
----
+## Acoes recomendadas para fechar 100%
 
-## Testes
+1. Executar `docs/features/FRONTEND_QA_CHECKLIST_2026-03-18.md` com evidencias.
+2. Consolidar metricas e paineis por feature no dashboard/admin.
+3. Atualizar checklist e status final de entrega apos o QA.
 
-- `pytest backend/tests/ -q` → **33 passed**
-- Cobertura: engine, memória, benchmark, adapters, schemas
+## Referencias
 
----
-
-## Gitignore
-
-Arquivos corretamente excluídos do versionamento:
-- `*.db`, `*.db-shm`, `*.db-wal`
-- `backend/logs/`, `logs/`
-- `backend/data/replays/`, `data/replays/`
-- `backend/hall_of_fame.json`, `backend/world_settings.json`
-- `.env`
-
----
-
-## Limitações Conhecidas
-
-| Limitação | Status |
-|-----------|--------|
-| Single worker (não escala horizontalmente) | Ativo — T17 no backlog |
-| `gc/` (Gemini CLI) sujeito a rate limit de conta | Monitorado |
-| Posição do benchmark HUD pode sair do viewport em mobile | Backlog |
+- `docs/ARCHITECTURE.md`
+- `docs/API_REFERENCE.md`
+- `docs/features/CHECKLIST.md`
+- `docs/features/IMPLEMENTATION_STATUS_2026-03-18.md`

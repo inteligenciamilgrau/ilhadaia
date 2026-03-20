@@ -315,6 +315,7 @@
       <a href="javascript:void(0)" onclick="goIsland()" style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">🌴 Ilha</a>
       <a href="dashboard.html" style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">📊 Dashboard</a>
       <a href="models.html"    style="text-decoration:none;color:#a78bfa;font-size:11px;font-weight:700;padding:5px 11px;border-radius:7px;background:rgba(124,111,255,.15)">🤖 Modelos</a>
+      <a href="admin.html"     style="text-decoration:none;color:#94a3b8;font-size:11px;font-weight:600;padding:5px 11px;border-radius:7px;transition:all .15s" onmouseover="this.style.background='rgba(255,255,255,.1)';this.style.color='#fff'" onmouseout="this.style.background='';this.style.color='#94a3b8'">⚙️ Admin</a>
     </nav>
     <button class="btn btn-primary" onclick="refreshAll()">🔄 Atualizar</button>
   </div>
@@ -369,6 +370,7 @@
       <button class="tab"        id="tab-agents"  onclick="switchTab('agents')">👥 Lista de Agentes</button>
       <button class="tab"        id="tab-register" onclick="switchTab('register')">➕ Adicionar Agente</button>
       <button class="tab"        id="tab-profiles" onclick="switchTab('profiles')">⚙️ Ver Perfis</button>
+      <button class="tab"        id="tab-feature-ops" onclick="switchTab('feature-ops')">🧩 Feature Ops</button>
     </div>
 
     <!-- TAB: Test Models -->
@@ -538,6 +540,336 @@
       </div>
     </div>
 
+    <!-- TAB: Feature Ops -->
+    <div class="tab-content" id="tc-feature-ops">
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="dot" style="background:var(--accent2)"></span> Bloco A - F01/F02/F03/F04/F05/F06/F07/F08/F09</div>
+          <span style="font-size:.75rem;color:var(--muted)">Comando, inspector, admin, benchmarks, temporadas e social</span>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Perfil A (F02)</label>
+            <select id="fops-ab-a"></select>
+          </div>
+          <div class="form-group">
+            <label>Perfil B (F02)</label>
+            <select id="fops-ab-b"></select>
+          </div>
+          <div class="form-group">
+            <label>Modo AB</label>
+            <select id="fops-ab-mode">
+              <option value="survival">survival</option>
+              <option value="gincana">gincana</option>
+              <option value="warfare">warfare</option>
+              <option value="economy">economy</option>
+              <option value="gangwar">gangwar</option>
+              <option value="hybrid">hybrid</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Ticks AB</label>
+            <input id="fops-ab-ticks" type="number" min="50" value="200"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsRunAB()">▶ Rodar AB</button>
+            <input id="fops-ab-run-id" type="text" placeholder="run_id para consulta" style="max-width:320px"/>
+            <button class="btn btn-outline btn-sm" onclick="fopsGetAB()">📄 Ver AB</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGetABReport()">📊 Ver Report</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Nome da temporada (F06)</label>
+            <input id="fops-season-name" type="text" value="S1-local"/>
+          </div>
+          <div class="form-group">
+            <label>Modo da temporada</label>
+            <select id="fops-season-mode">
+              <option value="survival">survival</option>
+              <option value="gincana">gincana</option>
+              <option value="warfare">warfare</option>
+              <option value="economy">economy</option>
+              <option value="gangwar">gangwar</option>
+              <option value="hybrid">hybrid</option>
+            </select>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsCreateSeason()">➕ Criar temporada</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsListSeasons()">📚 Listar temporadas</button>
+            <input id="fops-season-id" type="text" placeholder="season_id para leaderboard" style="max-width:290px"/>
+            <button class="btn btn-outline btn-sm" onclick="fopsSeasonLeaderboard()">🏆 Leaderboard ELO</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Profile ID (F09)</label>
+            <input id="fops-profile-id" type="text" value="claude-kiro"/>
+          </div>
+          <div class="form-group">
+            <label>Versao (ativar)</label>
+            <input id="fops-profile-version" type="number" min="1" value="1"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <input id="fops-profile-note" type="text" placeholder="Nota da versao" style="max-width:380px"/>
+            <button class="btn btn-primary btn-sm" onclick="fopsCreateProfileVersion()">💾 Criar versao</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsListProfileVersions()">📜 Listar versoes</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsActivateProfileVersion()">🔁 Ativar versao</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Evento (F04)</label>
+            <input id="fops-event-type" type="text" value="tempestade"/>
+          </div>
+          <div class="form-group">
+            <label>Mensagem de evento</label>
+            <input id="fops-event-msg" type="text" placeholder="Mensagem opcional"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="fopsEventTemplates()">🧾 Templates</button>
+            <button class="btn btn-primary btn-sm" onclick="fopsTriggerEvent()">⚡ Disparar evento</button>
+            <input id="fops-admin-ai-interval" type="number" value="5" style="max-width:130px" />
+            <button class="btn btn-outline btn-sm" onclick="fopsAdminWorldPatch()">🛠 Patch world</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsAdminAgentProfile()">👤 Admin profile</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Spawn admin (tipo,x,y)</label>
+            <input id="fops-admin-spawn" type="text" value="tree,10,10"/>
+          </div>
+          <div class="form-group">
+            <label>Extra JSON (opcional)</label>
+            <input id="fops-admin-spawn-extra" type="text" placeholder='{"rarity":"rare"}'/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-outline btn-sm" onclick="fopsAdminSpawn()">📦 Spawn admin</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Agente comandante (F01/F03)</label>
+            <select id="fops-cmd-agent"></select>
+          </div>
+          <div class="form-group">
+            <label>Comando humano (F01)</label>
+            <input id="fops-cmd-text" type="text" value="Proteja seu time e busque recursos"/>
+          </div>
+          <div class="form-group">
+            <label>Expira em ticks</label>
+            <input id="fops-cmd-expire" type="number" min="1" value="30"/>
+          </div>
+          <div class="form-group">
+            <label>Decisoes (n)</label>
+            <input id="fops-decisions-n" type="number" min="1" max="20" value="5"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsSetCommand()">🎮 Definir comando</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGetCommand()">🔎 Ver comando</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsCancelCommand()">🧹 Cancelar comando</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGetDecisions()">🧠 Decisoes</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGetMemory()">🗂 Memoria relevante</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Agente fonte (F07)</label>
+            <select id="fops-agent-a"></select>
+          </div>
+          <div class="form-group">
+            <label>Agente alvo (F07)</label>
+            <select id="fops-agent-b"></select>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsCreateAlliance()">🤝 Criar alianca</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsBetray()">🗡 Trair</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGetReputation()">⭐ Ver reputacao</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsAssignMissions()">🎯 Atribuir missoes</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsMissionTemplates()">📚 Templates de missao</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsMissionProgress()">📈 Progresso de missoes</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="dot" style="background:var(--yellow)"></span> Bloco B - F12/F13/F14/F15/F16</div>
+          <span style="font-size:.75rem;color:var(--muted)">Gincana e Warfare</span>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Reset para modo</label>
+            <select id="fops-reset-mode-b">
+              <option value="gincana">gincana</option>
+              <option value="warfare">warfare</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Player count</label>
+            <input id="fops-reset-count-b" type="number" min="2" value="6"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsResetMode('b')">♻️ Reset modo</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGincanaStart()">🏁 Start gincana</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGincanaTemplates()">🧾 Templates gincana</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGincanaState()">📍 Estado gincana</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsWarfareStart()">⚔️ Start warfare</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsWarfareState()">🛡 Estado warfare</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsCombatConfig()">💥 Combat config</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsZonesState()">🗺 Zona/territorio</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Arremesso - atacante</label>
+            <select id="fops-throw-agent"></select>
+          </div>
+          <div class="form-group">
+            <label>Alvo X,Y</label>
+            <input id="fops-throw-xy" type="text" value="12,12"/>
+          </div>
+          <div class="form-group">
+            <label>Time para roles</label>
+            <select id="fops-team-id">
+              <option value="alpha">alpha</option>
+              <option value="beta">beta</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Zona (x,y,nome)</label>
+            <input id="fops-zone-data" type="text" value="20,20,Zona Central"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsThrowAction()">🪨 Throw</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsTeamRolesGet()">👥 Ver roles do time</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsTeamRolesRebalance()">♻️ Rebalancear roles</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsZoneConfig()">📌 Configurar zona</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-title"><span class="dot" style="background:var(--green)"></span> Bloco C - F10/F11/F17/F18/F19/F20</div>
+          <span style="font-size:.75rem;color:var(--muted)">Economia, webhooks e gangwar/hybrid</span>
+        </div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Reset para modo</label>
+            <select id="fops-reset-mode-c">
+              <option value="economy">economy</option>
+              <option value="gangwar">gangwar</option>
+              <option value="hybrid">hybrid</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Player count</label>
+            <input id="fops-reset-count-c" type="number" min="2" value="6"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsResetMode('c')">♻️ Reset modo</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsEconomyStart()">💰 Start economy</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsEconomyState()">📦 Estado economy</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsRecipes()">📚 Recipes</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsMarketPrices()">💹 Market prices</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsMarketRecalculate()">♻️ Recalculate market</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsContractsList()">📜 Contratos</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGangwarStart()">🏴‍☠️ Start gangwar</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsGangwarState()">🧭 Estado gangwar</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsHybridStart()">🔀 Start hybrid</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsHybridState()">🧬 Estado hybrid</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Agente economia</label>
+            <select id="fops-econ-agent"></select>
+          </div>
+          <div class="form-group">
+            <label>Craft recipe</label>
+            <input id="fops-recipe" type="text" value="bandage"/>
+          </div>
+          <div class="form-group">
+            <label>Build (tipo,x,y)</label>
+            <input id="fops-build" type="text" value="wall,8,8"/>
+          </div>
+          <div class="form-group">
+            <label>Mercado (item,qty)</label>
+            <input id="fops-market" type="text" value="apple,1"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsCraft()">🛠 Craft</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsBuild()">🏗 Build</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsMarketBuy()">🛒 Buy</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsMarketSell()">💱 Sell</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsContractCreate()">✍️ Criar contrato</button>
+            <input id="fops-contract-id" type="number" min="1" placeholder="contract_id" style="max-width:140px"/>
+            <button class="btn btn-outline btn-sm" onclick="fopsContractFulfillPath()">✅ Fulfill contrato</button>
+          </div>
+        </div>
+
+        <div class="sep"></div>
+
+        <div class="form-grid">
+          <div class="form-group">
+            <label>Webhook owner_id</label>
+            <input id="fops-wh-owner" type="text" value="dev-local"/>
+          </div>
+          <div class="form-group">
+            <label>Webhook URL</label>
+            <input id="fops-wh-url" type="text" placeholder="https://webhook.site/SEU-ID"/>
+          </div>
+          <div class="form-group full" style="display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-primary btn-sm" onclick="fopsWebhookRegister()">🔗 Registrar webhook</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsWebhookList()">📚 Listar webhooks</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsWebhookTest()">🧪 Testar webhook</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsWebhookDeliveries()">📮 Deliveries</button>
+            <button class="btn btn-outline btn-sm" onclick="fopsWebhookStats()">📊 Stats webhook</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title" style="margin-bottom:12px">🧾 Resultado Feature Ops</div>
+        <pre id="fops-output" style="background:var(--bg3);border-radius:8px;padding:14px;font-size:.75rem;color:var(--accent2);overflow:auto;border:1px solid var(--border);max-height:380px">Aguardando ação...</pre>
+      </div>
+    </div>
+
   </main>
 </div>
 
@@ -635,6 +967,85 @@ let currentAdminToken = localStorage.getItem('bbb_admin_token') || 'dev_token_12
 let _profiles = [];
 let _testResults = {};
 let _testedCount = 0;
+let _agentsCache = [];
+
+function fopsSetOutput(title, payload) {
+  const out = document.getElementById('fops-output');
+  if (!out) return;
+  const now = new Date().toLocaleTimeString('pt-BR');
+  const body = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
+  out.textContent = `[${now}] ${title}\n\n${body}`;
+}
+
+function promptAdminTokenAsync() {
+  return new Promise((resolve) => {
+    openAdminPrompt(() => resolve(currentAdminToken));
+  });
+}
+
+async function fopsRequest(path, method = 'GET', body = null, admin = false) {
+  const doFetch = () => {
+    const headers = { 'Content-Type': 'application/json' };
+    if (admin) headers['X-Admin-Token'] = currentAdminToken;
+    return fetch(`${API}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : null,
+    });
+  };
+
+  let res = await doFetch();
+  if (admin && res.status === 401) {
+    await promptAdminTokenAsync();
+    res = await doFetch();
+  }
+
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const detail = data.detail || `HTTP ${res.status}`;
+    throw new Error(detail);
+  }
+  return data;
+}
+
+function fopsAgentOptions() {
+  return _agentsCache
+    .filter(a => a && a.id && a.status !== 'potential')
+    .map(a => `<option value="${a.id}">${a.name} (${a.id.slice(0, 8)})</option>`)
+    .join('');
+}
+
+function fopsProfileOptions() {
+  return _profiles.map(p => `<option value="${p.profile_id}">${p.profile_id}</option>`).join('');
+}
+
+function fopsRefreshSelectors() {
+  const profileA = document.getElementById('fops-ab-a');
+  const profileB = document.getElementById('fops-ab-b');
+  const profId = document.getElementById('fops-profile-id');
+  const aSel = document.getElementById('fops-agent-a');
+  const bSel = document.getElementById('fops-agent-b');
+  const cmdSel = document.getElementById('fops-cmd-agent');
+  const throwSel = document.getElementById('fops-throw-agent');
+  const econSel = document.getElementById('fops-econ-agent');
+
+  const pHtml = fopsProfileOptions();
+  const aHtml = fopsAgentOptions();
+
+  if (profileA) profileA.innerHTML = pHtml;
+  if (profileB) profileB.innerHTML = pHtml;
+  if (profId && _profiles.length && !profId.value) profId.value = _profiles[0].profile_id;
+
+  if (aSel) aSel.innerHTML = aHtml;
+  if (bSel) bSel.innerHTML = aHtml;
+  if (cmdSel) cmdSel.innerHTML = aHtml;
+  if (throwSel) throwSel.innerHTML = aHtml;
+  if (econSel) econSel.innerHTML = aHtml;
+
+  if (profileA && _profiles.length && !profileA.value) profileA.value = _profiles[0].profile_id;
+  if (profileB && _profiles.length > 1 && !profileB.value) profileB.value = _profiles[1].profile_id;
+  if (profileB && _profiles.length === 1 && !profileB.value) profileB.value = _profiles[0].profile_id;
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('DOMContentLoaded', async () => {
@@ -677,6 +1088,7 @@ async function loadProfiles() {
     renderTestCards();
     renderProfilesTable();
     renderRegisterProfileOptions();
+    fopsRefreshSelectors();
     document.getElementById('kpi-total-profiles').textContent = _profiles.length;
     document.getElementById('kpi-tested').textContent = `${_testedCount} / ${_profiles.length}`;
   } catch(e) {
@@ -893,8 +1305,10 @@ async function loadAgents() {
     const res = await fetch(`${API}/agents/all`).catch(() => null);
     if (!res) return;
     const data = await res.json();
+    _agentsCache = data.agents || [];
 
-    renderAgents(data.agents || []);
+    renderAgents(_agentsCache);
+    fopsRefreshSelectors();
 
     // Sidebar summary
     const sb = document.getElementById('sidebar-agents');
@@ -1275,6 +1689,732 @@ function updateCurlPreview() {
   }'`;
 }
 
+// ── Feature Ops (F02..F20) ─────────────────────────────────────────────────
+function fopsAgentNameById(agentId) {
+  const ag = _agentsCache.find(a => a.id === agentId);
+  return ag ? ag.name : '';
+}
+
+function fopsParseTriplet(raw, fallbackA = '', fallbackB = '', fallbackC = '') {
+  const parts = String(raw || '')
+    .split(',')
+    .map(v => v.trim());
+  return [parts[0] || fallbackA, parts[1] || fallbackB, parts[2] || fallbackC];
+}
+
+async function fopsRunAB() {
+  try {
+    const payload = {
+      profile_a: document.getElementById('fops-ab-a').value,
+      profile_b: document.getElementById('fops-ab-b').value,
+      game_mode: document.getElementById('fops-ab-mode').value,
+      ticks: parseInt(document.getElementById('fops-ab-ticks').value || '200', 10),
+    };
+    const data = await fopsRequest('/benchmarks/ab', 'POST', payload, true);
+    const runId = data.run_id || '';
+    if (runId) document.getElementById('fops-ab-run-id').value = runId;
+    toast('ok', 'AB benchmark executado');
+    fopsSetOutput('F02 /benchmarks/ab', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F02 erro', e.message);
+  }
+}
+
+async function fopsGetAB() {
+  try {
+    const runId = document.getElementById('fops-ab-run-id').value.trim();
+    if (!runId) throw new Error('Informe o run_id');
+    const data = await fopsRequest(`/benchmarks/ab/${encodeURIComponent(runId)}`);
+    fopsSetOutput('F02 /benchmarks/ab/{run_id}', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F02 erro', e.message);
+  }
+}
+
+async function fopsGetABReport() {
+  try {
+    const runId = document.getElementById('fops-ab-run-id').value.trim();
+    if (!runId) throw new Error('Informe o run_id');
+    const data = await fopsRequest(`/benchmarks/ab/${encodeURIComponent(runId)}/report`);
+    fopsSetOutput('F02 /benchmarks/ab/{run_id}/report', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F02 erro', e.message);
+  }
+}
+
+async function fopsCreateSeason() {
+  try {
+    const payload = {
+      name: document.getElementById('fops-season-name').value.trim() || `S-${Date.now()}`,
+      game_mode: document.getElementById('fops-season-mode').value,
+      description: 'Criada via Feature Ops',
+    };
+    const data = await fopsRequest('/seasons', 'POST', payload, true);
+    toast('ok', 'Temporada criada');
+    fopsSetOutput('F06 /seasons (POST)', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F06 erro', e.message);
+  }
+}
+
+async function fopsListSeasons() {
+  try {
+    const data = await fopsRequest('/seasons');
+    fopsSetOutput('F06 /seasons (GET)', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F06 erro', e.message);
+  }
+}
+
+async function fopsSeasonLeaderboard() {
+  try {
+    const seasonId = document.getElementById('fops-season-id').value.trim();
+    if (!seasonId) throw new Error('Informe season_id');
+    const data = await fopsRequest(`/seasons/${encodeURIComponent(seasonId)}/leaderboard`);
+    fopsSetOutput('F06 /seasons/{id}/leaderboard', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F06 erro', e.message);
+  }
+}
+
+async function fopsCreateProfileVersion() {
+  try {
+    const profileId = document.getElementById('fops-profile-id').value.trim();
+    if (!profileId) throw new Error('Informe profile_id');
+    const note = document.getElementById('fops-profile-note').value.trim() || 'versao via feature ops';
+    const data = await fopsRequest(`/profiles/${encodeURIComponent(profileId)}/versions`, 'POST', { note }, true);
+    toast('ok', 'Versao de perfil criada');
+    fopsSetOutput('F09 /profiles/{id}/versions (POST)', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F09 erro', e.message);
+  }
+}
+
+async function fopsListProfileVersions() {
+  try {
+    const profileId = document.getElementById('fops-profile-id').value.trim();
+    if (!profileId) throw new Error('Informe profile_id');
+    const data = await fopsRequest(`/profiles/${encodeURIComponent(profileId)}/versions`);
+    fopsSetOutput('F09 /profiles/{id}/versions (GET)', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F09 erro', e.message);
+  }
+}
+
+async function fopsActivateProfileVersion() {
+  try {
+    const profileId = document.getElementById('fops-profile-id').value.trim();
+    const version = parseInt(document.getElementById('fops-profile-version').value || '1', 10);
+    if (!profileId) throw new Error('Informe profile_id');
+    const data = await fopsRequest(`/profiles/${encodeURIComponent(profileId)}/activate/${version}`, 'POST', {}, true);
+    toast('ok', 'Versao ativada');
+    fopsSetOutput('F09 /profiles/{id}/activate/{version}', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F09 erro', e.message);
+  }
+}
+
+async function fopsEventTemplates() {
+  try {
+    const data = await fopsRequest('/events/templates');
+    fopsSetOutput('F04 /events/templates', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F04 erro', e.message);
+  }
+}
+
+async function fopsTriggerEvent() {
+  try {
+    const eventType = encodeURIComponent(document.getElementById('fops-event-type').value.trim() || 'tempestade');
+    const data = await fopsRequest(`/events/trigger?event_type=${eventType}`, 'POST', null, true);
+    toast('ok', 'Evento disparado');
+    fopsSetOutput('F04 /events/trigger', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F04 erro', e.message);
+  }
+}
+
+async function fopsAdminWorldPatch() {
+  try {
+    const aiInterval = parseInt(document.getElementById('fops-admin-ai-interval').value || '5', 10);
+    const data = await fopsRequest('/admin/world/patch', 'POST', { ai_interval: aiInterval }, true);
+    fopsSetOutput('F05 /admin/world/patch', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F05 erro', e.message);
+  }
+}
+
+async function fopsAdminAgentProfile() {
+  try {
+    const agentId = document.getElementById('fops-agent-a').value;
+    const profileId = document.getElementById('fops-profile-id').value.trim();
+    if (!agentId || !profileId) throw new Error('Selecione agente e profile_id');
+    const data = await fopsRequest(
+      `/admin/agent/${encodeURIComponent(agentId)}/profile`,
+      'POST',
+      { profile_id: profileId },
+      true
+    );
+    fopsSetOutput('F05 /admin/agent/{id}/profile', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F05 erro', e.message);
+  }
+}
+
+async function fopsAdminSpawn() {
+  try {
+    const [type, x, y] = fopsParseTriplet(document.getElementById('fops-admin-spawn').value, 'tree', '10', '10');
+    const rawExtra = document.getElementById('fops-admin-spawn-extra').value.trim();
+    let extra = {};
+    if (rawExtra) {
+      try {
+        extra = JSON.parse(rawExtra);
+      } catch {
+        throw new Error('Extra JSON invalido');
+      }
+    }
+    const payload = {
+      type,
+      x: parseInt(x, 10),
+      y: parseInt(y, 10),
+      extra,
+    };
+    const data = await fopsRequest('/admin/spawn', 'POST', payload, true);
+    fopsSetOutput('F05 /admin/spawn', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F05 erro', e.message);
+  }
+}
+
+async function fopsSetCommand() {
+  try {
+    const agentId = document.getElementById('fops-cmd-agent').value;
+    const command = document.getElementById('fops-cmd-text').value.trim();
+    const expireTicks = parseInt(document.getElementById('fops-cmd-expire').value || '30', 10);
+    if (!agentId || !command) throw new Error('Selecione agente e informe comando');
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentId)}/command`, 'POST', {
+      command,
+      expire_ticks: expireTicks,
+    });
+    fopsSetOutput('F01 /agents/{id}/command', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F01 erro', e.message);
+  }
+}
+
+async function fopsCancelCommand() {
+  try {
+    const agentId = document.getElementById('fops-cmd-agent').value;
+    if (!agentId) throw new Error('Selecione agente');
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentId)}/command/cancel`, 'POST');
+    fopsSetOutput('F01 /agents/{id}/command/cancel', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F01 erro', e.message);
+  }
+}
+
+async function fopsGetCommand() {
+  try {
+    const agentId = document.getElementById('fops-cmd-agent').value;
+    if (!agentId) throw new Error('Selecione agente');
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentId)}/command`);
+    fopsSetOutput('F01 /agents/{id}/command (GET)', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F01 erro', e.message);
+  }
+}
+
+async function fopsGetDecisions() {
+  try {
+    const agentId = document.getElementById('fops-cmd-agent').value;
+    const n = parseInt(document.getElementById('fops-decisions-n').value || '5', 10);
+    if (!agentId) throw new Error('Selecione agente');
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentId)}/decisions?n=${n}`);
+    fopsSetOutput('F03 /agents/{id}/decisions', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F03 erro', e.message);
+  }
+}
+
+async function fopsGetMemory() {
+  try {
+    const agentId = document.getElementById('fops-cmd-agent').value;
+    if (!agentId) throw new Error('Selecione agente');
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentId)}/memory/relevant`);
+    fopsSetOutput('F03 /agents/{id}/memory/relevant', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F03 erro', e.message);
+  }
+}
+
+async function fopsCreateAlliance() {
+  try {
+    const agentA = document.getElementById('fops-agent-a').value;
+    const agentB = document.getElementById('fops-agent-b').value;
+    const agentBName = fopsAgentNameById(agentB);
+    if (!agentA || !agentBName) throw new Error('Selecione agentes validos');
+    const payload = { agent_b_name: agentBName };
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentA)}/alliances`, 'POST', payload);
+    toast('ok', 'Alianca criada');
+    fopsSetOutput('F07 /agents/{id}/alliances', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F07 erro', e.message);
+  }
+}
+
+async function fopsBetray() {
+  try {
+    const agentA = document.getElementById('fops-agent-a').value;
+    if (!agentA) throw new Error('Selecione agente fonte');
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentA)}/betray`, 'POST');
+    toast('ok', 'Traicao executada');
+    fopsSetOutput('F07 /agents/{id}/betray', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F07 erro', e.message);
+  }
+}
+
+async function fopsGetReputation() {
+  try {
+    const agentA = document.getElementById('fops-agent-a').value;
+    if (!agentA) throw new Error('Selecione agente');
+    const data = await fopsRequest(`/agents/${encodeURIComponent(agentA)}/reputation`);
+    fopsSetOutput('F07 /agents/{id}/reputation', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F07 erro', e.message);
+  }
+}
+
+async function fopsAssignMissions() {
+  try {
+    const data = await fopsRequest('/missions/assign', 'POST', null, true);
+    toast('ok', 'Missoes atribuidas');
+    fopsSetOutput('F08 /missions/assign', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F08 erro', e.message);
+  }
+}
+
+async function fopsMissionTemplates() {
+  try {
+    const data = await fopsRequest('/missions/templates');
+    fopsSetOutput('F08 /missions/templates', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F08 erro', e.message);
+  }
+}
+
+async function fopsMissionProgress() {
+  try {
+    const data = await fopsRequest('/missions/progress');
+    fopsSetOutput('F08 /missions/progress', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F08 erro', e.message);
+  }
+}
+
+async function fopsResetMode(block) {
+  try {
+    const modeSel = document.getElementById(`fops-reset-mode-${block}`);
+    const countSel = document.getElementById(`fops-reset-count-${block}`);
+    const payload = {
+      player_count: parseInt((countSel?.value || '4'), 10),
+      game_mode: modeSel?.value || 'survival',
+    };
+    const data = await fopsRequest('/reset', 'POST', payload, true);
+    await loadAgents();
+    toast('ok', `Reset em modo ${payload.game_mode}`);
+    fopsSetOutput('Reset /reset', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('Reset erro', e.message);
+  }
+}
+
+async function fopsGincanaStart() {
+  try {
+    const data = await fopsRequest('/modes/gincana/start', 'POST', { max_ticks: 400 }, true);
+    fopsSetOutput('F12 /modes/gincana/start', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F12 erro', e.message);
+  }
+}
+
+async function fopsGincanaState() {
+  try {
+    const data = await fopsRequest('/gincana/state');
+    fopsSetOutput('F12 /gincana/state', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F12 erro', e.message);
+  }
+}
+
+async function fopsGincanaTemplates() {
+  try {
+    const data = await fopsRequest('/modes/gincana/templates');
+    fopsSetOutput('F12 /modes/gincana/templates', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F12 erro', e.message);
+  }
+}
+
+async function fopsWarfareStart() {
+  try {
+    const data = await fopsRequest('/modes/warfare/start', 'POST', { max_ticks: 600 }, true);
+    fopsSetOutput('F13 /modes/warfare/start', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F13 erro', e.message);
+  }
+}
+
+async function fopsWarfareState() {
+  try {
+    const data = await fopsRequest('/modes/warfare/state');
+    fopsSetOutput('F13 /modes/warfare/state', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F13 erro', e.message);
+  }
+}
+
+async function fopsCombatConfig() {
+  try {
+    const data = await fopsRequest('/combat/config');
+    fopsSetOutput('F14 /combat/config', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F14 erro', e.message);
+  }
+}
+
+async function fopsZonesState() {
+  try {
+    const data = await fopsRequest('/zones/state');
+    fopsSetOutput('F16 /zones/state', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F16 erro', e.message);
+  }
+}
+
+async function fopsThrowAction() {
+  try {
+    const attacker = document.getElementById('fops-throw-agent').value;
+    const [x, y] = fopsParseTriplet(document.getElementById('fops-throw-xy').value, '12', '12');
+    const payload = { attacker_id: attacker, target_x: parseInt(x, 10), target_y: parseInt(y, 10) };
+    const data = await fopsRequest('/actions/throw', 'POST', payload);
+    fopsSetOutput('F14 /actions/throw', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F14 erro', e.message);
+  }
+}
+
+async function fopsTeamRolesGet() {
+  try {
+    const team = document.getElementById('fops-team-id').value;
+    const data = await fopsRequest(`/teams/${encodeURIComponent(team)}/roles`);
+    fopsSetOutput('F15 /teams/{id}/roles GET', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F15 erro', e.message);
+  }
+}
+
+async function fopsTeamRolesRebalance() {
+  try {
+    const team = document.getElementById('fops-team-id').value;
+    const data = await fopsRequest(`/teams/${encodeURIComponent(team)}/roles`, 'POST', {});
+    fopsSetOutput('F15 /teams/{id}/roles POST', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F15 erro', e.message);
+  }
+}
+
+async function fopsZoneConfig() {
+  try {
+    const [x, y, name] = fopsParseTriplet(document.getElementById('fops-zone-data').value, '20', '20', 'Zona Central');
+    const payload = { x: parseInt(x, 10), y: parseInt(y, 10), name };
+    const data = await fopsRequest('/zones/config', 'POST', payload);
+    fopsSetOutput('F16 /zones/config POST', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F16 erro', e.message);
+  }
+}
+
+async function fopsEconomyStart() {
+  try {
+    const data = await fopsRequest('/modes/economy/start', 'POST', null, true);
+    fopsSetOutput('F17 /modes/economy/start', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F17 erro', e.message);
+  }
+}
+
+async function fopsEconomyState() {
+  try {
+    const data = await fopsRequest('/modes/economy/state');
+    fopsSetOutput('F17 /modes/economy/state', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F17 erro', e.message);
+  }
+}
+
+async function fopsRecipes() {
+  try {
+    const data = await fopsRequest('/recipes');
+    fopsSetOutput('F10 /recipes', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F10 erro', e.message);
+  }
+}
+
+async function fopsMarketPrices() {
+  try {
+    const data = await fopsRequest('/market/prices');
+    fopsSetOutput('F18 /market/prices', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F18 erro', e.message);
+  }
+}
+
+async function fopsMarketRecalculate() {
+  try {
+    const data = await fopsRequest('/market/recalculate', 'POST');
+    fopsSetOutput('F18 /market/recalculate', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F18 erro', e.message);
+  }
+}
+
+async function fopsContractsList() {
+  try {
+    const data = await fopsRequest('/contracts');
+    fopsSetOutput('F19 /contracts GET', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F19 erro', e.message);
+  }
+}
+
+async function fopsGangwarStart() {
+  try {
+    const data = await fopsRequest('/gangwar/start', 'POST', { max_ticks: 500 }, true);
+    fopsSetOutput('F20 /gangwar/start', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F20 erro', e.message);
+  }
+}
+
+async function fopsGangwarState() {
+  try {
+    const data = await fopsRequest('/gangwar/state');
+    fopsSetOutput('F20 /gangwar/state', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F20 erro', e.message);
+  }
+}
+
+async function fopsHybridStart() {
+  try {
+    const data = await fopsRequest('/modes/hybrid/start', 'POST', { max_ticks: 500 }, true);
+    fopsSetOutput('F20 /modes/hybrid/start', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F20 erro', e.message);
+  }
+}
+
+async function fopsHybridState() {
+  try {
+    const data = await fopsRequest('/modes/hybrid/state');
+    fopsSetOutput('F20 /modes/hybrid/state', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F20 erro', e.message);
+  }
+}
+
+async function fopsCraft() {
+  try {
+    const agentId = document.getElementById('fops-econ-agent').value;
+    const recipe = document.getElementById('fops-recipe').value.trim() || 'bandage';
+    const data = await fopsRequest('/craft', 'POST', { agent_id: agentId, recipe });
+    fopsSetOutput('F10 /craft', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F10 erro', e.message);
+  }
+}
+
+async function fopsBuild() {
+  try {
+    const agentId = document.getElementById('fops-econ-agent').value;
+    const [type, x, y] = fopsParseTriplet(document.getElementById('fops-build').value, 'wall', '8', '8');
+    const data = await fopsRequest('/build', 'POST', {
+      agent_id: agentId,
+      structure_type: type,
+      x: parseInt(x, 10),
+      y: parseInt(y, 10),
+    });
+    fopsSetOutput('F10 /build', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F10 erro', e.message);
+  }
+}
+
+async function fopsMarketBuy() {
+  try {
+    const agentId = document.getElementById('fops-econ-agent').value;
+    const [item, qty] = fopsParseTriplet(document.getElementById('fops-market').value, 'apple', '1');
+    const data = await fopsRequest('/market/buy', 'POST', { agent_id: agentId, item, qty: parseInt(qty, 10) || 1 });
+    fopsSetOutput('F18 /market/buy', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F18 erro', e.message);
+  }
+}
+
+async function fopsMarketSell() {
+  try {
+    const agentId = document.getElementById('fops-econ-agent').value;
+    const [item, qty] = fopsParseTriplet(document.getElementById('fops-market').value, 'apple', '1');
+    const data = await fopsRequest('/market/sell', 'POST', { agent_id: agentId, item, qty: parseInt(qty, 10) || 1 });
+    fopsSetOutput('F18 /market/sell', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F18 erro', e.message);
+  }
+}
+
+async function fopsContractCreate() {
+  try {
+    const agentId = document.getElementById('fops-econ-agent').value;
+    const data = await fopsRequest('/contracts', 'POST', {
+      requester_id: agentId,
+      item: 'wood',
+      qty: 1,
+      reward: 5.0,
+    });
+    fopsSetOutput('F19 /contracts POST', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F19 erro', e.message);
+  }
+}
+
+async function fopsContractFulfillPath() {
+  try {
+    const agentId = document.getElementById('fops-econ-agent').value;
+    const contractId = parseInt(document.getElementById('fops-contract-id').value || '0', 10);
+    if (!agentId || !contractId) throw new Error('Informe agent_id e contract_id');
+    const data = await fopsRequest(`/contracts/${contractId}/fulfill`, 'POST', { agent_id: agentId });
+    fopsSetOutput('F19 /contracts/{id}/fulfill', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F19 erro', e.message);
+  }
+}
+
+async function fopsWebhookRegister() {
+  try {
+    const owner = document.getElementById('fops-wh-owner').value.trim() || 'dev-local';
+    const url = document.getElementById('fops-wh-url').value.trim();
+    if (!url) throw new Error('Informe URL de webhook');
+    const data = await fopsRequest('/webhooks', 'POST', {
+      owner_id: owner,
+      url,
+      events: ['all'],
+      secret: '',
+    });
+    fopsSetOutput('F11 /webhooks POST', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F11 erro', e.message);
+  }
+}
+
+async function fopsWebhookList() {
+  try {
+    const owner = document.getElementById('fops-wh-owner').value.trim() || 'dev-local';
+    const data = await fopsRequest(`/webhooks/${encodeURIComponent(owner)}`);
+    fopsSetOutput('F11 /webhooks/{owner_id}', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F11 erro', e.message);
+  }
+}
+
+async function fopsWebhookTest() {
+  try {
+    const owner = document.getElementById('fops-wh-owner').value.trim() || 'dev-local';
+    const data = await fopsRequest('/webhooks/test', 'POST', { owner_id: owner }, true);
+    fopsSetOutput('F11 /webhooks/test', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F11 erro', e.message);
+  }
+}
+
+async function fopsWebhookDeliveries() {
+  try {
+    const data = await fopsRequest('/webhooks/deliveries', 'GET', null, true);
+    fopsSetOutput('F11 /webhooks/deliveries', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F11 erro', e.message);
+  }
+}
+
+async function fopsWebhookStats() {
+  try {
+    const data = await fopsRequest('/webhooks/admin/stats', 'GET', null, true);
+    fopsSetOutput('F11 /webhooks/admin/stats', data);
+  } catch (e) {
+    toast('err', e.message);
+    fopsSetOutput('F11 erro', e.message);
+  }
+}
+
 // ── Tabs ──────────────────────────────────────────────────────────────────────
 function switchTab(name) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
@@ -1283,6 +2423,7 @@ function switchTab(name) {
   document.getElementById(`tc-${name}`).classList.add('active');
   if (name === 'agents') loadAgents();
   if (name === 'profiles') renderProfilesTable();
+  if (name === 'feature-ops') fopsRefreshSelectors();
 }
 
 // ── Log ───────────────────────────────────────────────────────────────────────

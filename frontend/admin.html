@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BBBia Admin — Painel Gerencial</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0e1a;
+  --surface: #111827;
+  --surface2: #1a2235;
+  --border: rgba(255,255,255,0.08);
+  --accent: #6366f1;
+  --accent-hover: #818cf8;
+  --success: #10b981;
+  --danger: #ef4444;
+  --warn: #f59e0b;
+  --info: #3b82f6;
+  --text: #e2e8f0;
+  --muted: #94a3b8;
+  --mono: 'JetBrains Mono', monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;font-size:14px}
+
+/* NAV */
+#gnav{display:flex;align-items:center;gap:8px;padding:0 20px;height:48px;background:rgba(17,24,39,0.95);border-bottom:1px solid var(--border);position:sticky;top:0;z-index:100;backdrop-filter:blur(12px)}
+#gnav-logo{font-weight:700;font-size:16px;color:#fff;margin-right:8px}
+.gnav-link{text-decoration:none;color:var(--muted);font-size:13px;font-weight:500;padding:5px 10px;border-radius:6px;transition:all .15s}
+.gnav-link:hover{color:#fff;background:rgba(255,255,255,0.06)}
+.gnav-active{color:#fff;background:rgba(99,102,241,0.2)}
+#gnav-right{margin-left:auto;display:flex;align-items:center;gap:8px}
+#token-input{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:5px 10px;border-radius:6px;font-size:12px;width:220px;font-family:var(--mono);transition:border-color .2s}
+#token-input:focus{border-color:var(--accent);outline:none}
+#token-save-btn{padding:5px 10px;background:var(--success);color:#fff;border:none;border-radius:6px;font-size:12px;cursor:pointer;font-weight:600;white-space:nowrap}
+#token-save-btn:hover{filter:brightness(1.1)}
+#mode-badge{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:rgba(99,102,241,0.2);color:var(--accent-hover);border:1px solid rgba(99,102,241,0.3)}
+#ws-dot{width:8px;height:8px;border-radius:50%;background:#555;display:inline-block}
+#ws-dot.ok{background:var(--success)}
+
+/* TABS */
+#tab-bar{display:flex;gap:2px;padding:12px 20px 0;background:var(--surface);border-bottom:1px solid var(--border);overflow-x:auto}
+.tab-btn{padding:8px 16px;background:transparent;border:none;color:var(--muted);font-family:'Inter',sans-serif;font-size:13px;font-weight:500;cursor:pointer;border-radius:8px 8px 0 0;transition:all .15s;white-space:nowrap;border-bottom:2px solid transparent}
+.tab-btn:hover{color:#fff;background:rgba(255,255,255,0.05)}
+.tab-btn.active{color:#fff;background:rgba(99,102,241,0.15);border-bottom-color:var(--accent)}
+
+/* PANELS */
+#panels{padding:20px;max-width:1400px;margin:0 auto}
+.panel{display:none}.panel.active{display:block}
+
+/* CARDS */
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:16px}
+.card-title{font-size:13px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.5px;margin-bottom:12px;display:flex;align-items:center;gap:6px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+.grid-3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px}
+
+/* FORMS */
+.field{display:flex;flex-direction:column;gap:4px;margin-bottom:10px}
+.field label{font-size:12px;color:var(--muted);font-weight:500}
+.field input,.field select,.field textarea{background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:7px 10px;border-radius:7px;font-size:13px;font-family:'Inter',sans-serif;outline:none;transition:border-color .15s}
+.field input:focus,.field select:focus,.field textarea:focus{border-color:var(--accent)}
+.field textarea{resize:vertical;min-height:70px;font-family:var(--mono);font-size:12px}
+
+/* BUTTONS */
+.btn{display:inline-flex;align-items:center;gap:6px;padding:7px 14px;border:none;border-radius:7px;font-size:13px;font-weight:500;cursor:pointer;transition:all .15s;font-family:'Inter',sans-serif}
+.btn-primary{background:var(--accent);color:#fff}.btn-primary:hover{background:var(--accent-hover)}
+.btn-success{background:var(--success);color:#fff}.btn-success:hover{filter:brightness(1.1)}
+.btn-danger{background:var(--danger);color:#fff}.btn-danger:hover{filter:brightness(1.1)}
+.btn-warn{background:var(--warn);color:#000}.btn-warn:hover{filter:brightness(1.1)}
+.btn-ghost{background:rgba(255,255,255,0.07);color:var(--text)}.btn-ghost:hover{background:rgba(255,255,255,0.12)}
+.btn-sm{padding:4px 10px;font-size:12px}
+.btn-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+
+/* TABLES */
+.tbl{width:100%;border-collapse:collapse;font-size:12px}
+.tbl th{text-align:left;padding:8px 10px;color:var(--muted);font-weight:600;border-bottom:1px solid var(--border)}
+.tbl td{padding:8px 10px;border-bottom:1px solid rgba(255,255,255,0.04)}
+.tbl tr:hover td{background:rgba(255,255,255,0.03)}
+
+/* BADGES */
+.badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:600}
+.badge-green{background:rgba(16,185,129,0.15);color:var(--success)}
+.badge-red{background:rgba(239,68,68,0.15);color:var(--danger)}
+.badge-blue{background:rgba(59,130,246,0.15);color:var(--info)}
+.badge-amber{background:rgba(245,158,11,0.15);color:var(--warn)}
+.badge-purple{background:rgba(99,102,241,0.2);color:var(--accent-hover)}
+
+/* TOAST */
+#toast-container{position:fixed;bottom:20px;right:20px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:10px 16px;border-radius:8px;font-size:13px;font-weight:500;max-width:320px;animation:slideIn .2s ease;box-shadow:0 4px 20px rgba(0,0,0,0.4)}
+.toast-ok{background:var(--success);color:#fff}
+.toast-err{background:var(--danger);color:#fff}
+.toast-info{background:var(--info);color:#fff}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* PRE OUTPUT */
+.output{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--mono);font-size:11px;color:#86efac;max-height:200px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+.output.err{color:#fca5a5}
+
+/* MODE CARDS */
+.mode-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}
+.mode-card{padding:16px;border:2px solid var(--border);border-radius:10px;cursor:pointer;transition:all .15s;text-align:center;background:var(--surface2)}
+.mode-card:hover{border-color:var(--accent);background:rgba(99,102,241,0.1)}
+.mode-card.selected{border-color:var(--accent);background:rgba(99,102,241,0.2)}
+.mode-card .mode-icon{font-size:28px;margin-bottom:6px}
+.mode-card .mode-name{font-weight:600;font-size:13px}
+.mode-card .mode-desc{font-size:11px;color:var(--muted);margin-top:4px}
+
+/* SECTION TITLES */
+.section-title{font-size:15px;font-weight:600;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+
+/* AGENT CARDS */
+.agent-table-wrap{max-height:260px;overflow-y:auto}
+
+/* STAT PILLS */
+.stats-row{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px}
+.stat-pill{padding:6px 12px;background:var(--surface2);border:1px solid var(--border);border-radius:20px;font-size:12px}
+.stat-pill span{font-weight:700;color:var(--accent-hover)}
+
+/* PRE-REQUISITO BANNER */
+.prereq-banner{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 14px;background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.35);border-radius:8px;margin-bottom:16px;font-size:13px}
+.prereq-banner .prereq-text{color:var(--warn);font-weight:500}
+.prereq-badge{padding:2px 10px;border-radius:20px;font-size:11px;font-weight:700;background:rgba(245,158,11,0.2);color:var(--warn);border:1px solid rgba(245,158,11,0.4);white-space:nowrap}
+.prereq-banner .btn-quick{padding:5px 12px;font-size:12px;background:var(--warn);color:#000;border:none;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap;transition:filter .15s}
+.prereq-banner .btn-quick:hover{filter:brightness(1.1)}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav id="gnav">
+  <div id="gnav-logo">🌴 iA</div>
+  <a class="gnav-link" href="index.html">🌴 Ilha</a>
+  <a class="gnav-link" href="dashboard.html">📊 Dashboard</a>
+  <a class="gnav-link" href="models.html">🤖 Modelos</a>
+  <a class="gnav-link gnav-active" href="admin.html">⚙️ Admin</a>
+  <div id="gnav-right">
+    <span id="ws-dot"></span>
+    <span style="color:var(--muted);font-size:11px">modo:</span>
+    <span id="mode-badge">—</span>
+    <input type="text" id="token-input" placeholder="Admin Token (.env: ADMIN_TOKEN)" title="Cole aqui o valor de ADMIN_TOKEN do seu .env">
+    <button id="token-save-btn" onclick="saveToken()" title="Salvar token no navegador">💾 Salvar</button>
+    <button class="btn btn-ghost btn-sm" onclick="refreshAll()">🔄</button>
+  </div>
+</nav>
+
+<!-- TABS -->
+<div id="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('mundo')">🌍 Mundo</button>
+  <button class="tab-btn" onclick="switchTab('agentes')">🤖 Agentes</button>
+  <button class="tab-btn" onclick="switchTab('modos')">🎮 Modos</button>
+  <button class="tab-btn" onclick="switchTab('warfare')">⚔️ Warfare</button>
+  <button class="tab-btn" onclick="switchTab('economia')">💰 Economia</button>
+  <button class="tab-btn" onclick="switchTab('webhooks')">🔔 Webhooks</button>
+  <button class="tab-btn" onclick="switchTab('benchmark')">📊 Benchmark</button>
+  <button class="tab-btn" onclick="switchTab('avancado')">🧠 Avançado</button>
+</div>
+
+<div id="panels">
+
+<!-- ════════════ MUNDO ════════════ -->
+<div class="panel active" id="panel-mundo">
+  <div class="grid-2">
+    <div>
+      <div class="card">
+        <div class="card-title">📡 Status do Servidor</div>
+        <div id="server-status-out" class="output">—</div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" onclick="loadServerStatus()">Atualizar</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-title">🔄 Sessões recentes</div>
+        <div id="sessions-out" class="output" style="max-height:120px">—</div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" onclick="loadSessions()">Carregar</button>
+        </div>
+      </div>
+    </div>
+    <div>
+      <div class="card">
+        <div class="card-title">🚀 Novo Reset / Modo</div>
+        <div class="field"><label>game_mode</label>
+          <select id="reset-mode">
+            <option>survival</option><option>gincana</option><option>warfare</option>
+            <option>economy</option><option>gangwar</option><option>hybrid</option>
+          </select>
+        </div>
+        <div class="field"><label>Agentes (player_count)</label>
+          <input type="number" id="reset-players" value="4" min="2" max="12">
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-danger" onclick="resetWorld()">⚡ Reset Mundo</button>
+        </div>
+        <div id="reset-out" class="output" style="margin-top:10px;display:none"></div>
+      </div>
+      <div class="card">
+        <div class="card-title">🔧 Patch do Mundo (F05)</div>
+        <div class="grid-2">
+          <div class="field"><label>started</label>
+            <select id="patch-started"><option value="">—</option><option value="true">true</option><option value="false">false</option></select>
+          </div>
+          <div class="field"><label>ai_interval</label>
+            <input type="number" id="patch-ai-interval" placeholder="ex: 3">
+          </div>
+          <div class="field"><label>event_chance (0-1)</label>
+            <input type="number" id="patch-event-chance" step="0.01" placeholder="ex: 0.05">
+          </div>
+          <div class="field"><label>game_over</label>
+            <select id="patch-game-over"><option value="">—</option><option value="true">true</option><option value="false">false</option></select>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-warn" onclick="patchWorld()">Aplicar Patch</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadWorldState()">Ver Estado Admin</button>
+        </div>
+        <div id="patch-out" class="output" style="margin-top:10px;display:none"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🌱 Spawnar Objeto (F05)</div>
+      <div class="grid-2">
+        <div class="field"><label>Tipo</label>
+          <select id="spawn-type">
+            <option>food</option><option>water</option><option>wood</option><option>stone</option>
+            <option>zombie</option><option>chest</option><option>supply_crate</option>
+          </select>
+        </div>
+        <div class="field"><label>Quantidade</label>
+          <input type="number" id="spawn-qty" value="1" min="1" max="20">
+        </div>
+        <div class="field"><label>X (opcional)</label><input type="number" id="spawn-x" placeholder="auto"></div>
+        <div class="field"><label>Y (opcional)</label><input type="number" id="spawn-y" placeholder="auto"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="spawnObject()">Spawnar</button>
+      </div>
+      <div id="spawn-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">⚡ Disparar Evento Admin (F05)</div>
+      <div class="field"><label>Tipo de evento</label>
+        <select id="admin-event-type">
+          <option>storm</option><option>drought</option><option>supply_drop</option>
+          <option>radio</option><option>eclipse</option>
+        </select>
+      </div>
+      <div class="field"><label>Mensagem personalizada</label>
+        <input type="text" id="admin-event-msg" placeholder="Mensagem opcional">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-warn" onclick="triggerAdminEvent()">Disparar Evento</button>
+      </div>
+      <div id="admin-event-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ AGENTES ════════════ -->
+<div class="panel" id="panel-agentes">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">👥 Agentes ao Vivo</div>
+      <div class="agent-table-wrap">
+        <table class="tbl" id="agents-table">
+          <thead><tr><th>Nome</th><th>HP</th><th>Perfil</th><th>Modo</th><th>Ações</th></tr></thead>
+          <tbody id="agents-tbody"><tr><td colspan="5" style="color:var(--muted);text-align:center">...</td></tr></tbody>
+        </table>
+      </div>
+      <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="loadAgents()">🔄 Atualizar</button></div>
+    </div>
+    <div class="card">
+      <div class="card-title">➕ Registrar Agente (admin)</div>
+      <div class="field"><label>Nome</label><input type="text" id="reg-name" placeholder="Ex: Bruna"></div>
+      <div class="field"><label>Perfil de IA</label>
+        <select id="reg-profile">
+          <option value="claude-kiro">claude-kiro ⭐</option>
+          <option value="claude-haiku">claude-haiku</option>
+          <option value="kimi-thinking">kimi-thinking</option>
+          <option value="kimi-groq">kimi-groq</option>
+          <option value="gemini-flash">gemini-flash</option>
+          <option value="llama-groq">llama-groq</option>
+          <option value="qwen-coder">qwen-coder</option>
+        </select>
+      </div>
+      <div class="btn-row"><button class="btn btn-success" onclick="registerAgent()">Registrar</button></div>
+      <div id="reg-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🎯 Modo Comandante — F01</div>
+      <div class="field"><label>agent_id</label><input type="text" id="cmd-agent-id" placeholder="ID do agente"></div>
+      <div class="field"><label>Comando em linguagem natural</label>
+        <textarea id="cmd-text" placeholder="Ex: Vá até o lago, beba água e procure frutas"></textarea>
+      </div>
+      <div class="field"><label>Expirar em (ticks)</label><input type="number" id="cmd-ttl" value="5" min="1" max="50"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="sendCommand()">Enviar Comando</button>
+        <button class="btn btn-ghost btn-sm" onclick="cancelCommand()">Cancelar</button>
+        <button class="btn btn-ghost btn-sm" onclick="getCommand()">Ver Ativo</button>
+      </div>
+      <div id="cmd-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔍 Inspector de Decisão — F03</div>
+      <div class="field"><label>agent_id</label><input type="text" id="insp-agent-id" placeholder="ID do agente"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="loadDecisions()">Últimas Decisões</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadMemory()">Memória Relevante</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadWallet()">Wallet/Coins</button>
+      </div>
+      <div id="insp-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🤝 Aliança e Reputação — F07</div>
+      <div class="field"><label>agent_id</label><input type="text" id="ally-agent-id" placeholder="ID do agente"></div>
+      <div class="field"><label>Nome do aliado (para formar aliança)</label><input type="text" id="ally-name" placeholder="Nome do outro agente"></div>
+      <div class="btn-row">
+        <button class="btn btn-success btn-sm" onclick="formAlliance()">Formar Aliança</button>
+        <button class="btn btn-warn btn-sm" onclick="breakAlliance()">Quebrar</button>
+        <button class="btn btn-danger btn-sm" onclick="betrayAlliance()">⚡ Trair</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadReputation()">Ver Reputação</button>
+      </div>
+      <div id="ally-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🎯 Trocar Perfil (F05)</div>
+      <div class="field"><label>agent_id</label><input type="text" id="profile-agent-id" placeholder="ID do agente"></div>
+      <div class="field"><label>Novo perfil</label>
+        <select id="profile-new-profile">
+          <option value="claude-kiro">claude-kiro</option>
+          <option value="claude-haiku">claude-haiku</option>
+          <option value="kimi-thinking">kimi-thinking</option>
+          <option value="kimi-groq">kimi-groq</option>
+          <option value="gemini-flash">gemini-flash</option>
+          <option value="llama-groq">llama-groq</option>
+        </select>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="changeProfile()">Trocar Perfil</button></div>
+      <div id="profile-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ MODOS ════════════ -->
+<div class="panel" id="panel-modos">
+  <div class="card">
+    <div class="card-title">🎮 Selecionar Modo de Jogo</div>
+    <div class="mode-grid" id="mode-grid">
+      <div class="mode-card selected" data-mode="survival" onclick="selectMode(this)">
+        <div class="mode-icon">🌴</div>
+        <div class="mode-name">Survival</div>
+        <div class="mode-desc">Mapa 32×32 — modo base</div>
+      </div>
+      <div class="mode-card" data-mode="gincana" onclick="selectMode(this)">
+        <div class="mode-icon">🏁</div>
+        <div class="mode-name">Gincana</div>
+        <div class="mode-desc">Checkpoints e artefatos (F12)</div>
+      </div>
+      <div class="mode-card" data-mode="warfare" onclick="selectMode(this)">
+        <div class="mode-icon">⚔️</div>
+        <div class="mode-name">Warfare</div>
+        <div class="mode-desc">Fações, arremesso, território (F13-F16)</div>
+      </div>
+      <div class="mode-card" data-mode="economy" onclick="selectMode(this)">
+        <div class="mode-icon">💰</div>
+        <div class="mode-name">Economy</div>
+        <div class="mode-desc">Crafting, mercado, contratos (F10/F17-F19)</div>
+      </div>
+      <div class="mode-card" data-mode="gangwar" onclick="selectMode(this)">
+        <div class="mode-icon">💣</div>
+        <div class="mode-name">GangWar</div>
+        <div class="mode-desc">Gangues, black market (F20)</div>
+      </div>
+      <div class="mode-card" data-mode="hybrid" onclick="selectMode(this)">
+        <div class="mode-icon">🔥</div>
+        <div class="mode-name">Hybrid</div>
+        <div class="mode-desc">GangWar + Economia integrada</div>
+      </div>
+    </div>
+    <div class="btn-row" style="margin-top:16px">
+      <input type="number" id="mode-players" value="4" min="2" max="12" style="width:80px;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:7px">
+      <label style="color:var(--muted);font-size:12px;align-self:center">agentes</label>
+      <button class="btn btn-danger" onclick="applyModeReset()">🚀 Reset para este Modo</button>
+    </div>
+    <div id="mode-out" class="output" style="margin-top:10px;display:none"></div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">📋 Templates de Gincana</div>
+      <div id="gincana-templates-out" class="output">—</div>
+      <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="loadGincanaTemplates()">Carregar</button></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📡 Estado Atual</div>
+      <div id="world-mode-state-out" class="output">—</div>
+      <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="loadCurrentModeState()">Atualizar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ WARFARE ════════════ -->
+<div class="panel" id="panel-warfare">
+  <div class="prereq-banner">
+    <div>
+      <span class="prereq-badge">⚠️ Pré-requisito</span>
+      <span class="prereq-text" style="margin-left:8px">Mundo deve estar em modo <strong>warfare</strong>. Modo atual: <strong id="prereq-warfare-mode">—</strong></span>
+    </div>
+    <button class="btn-quick" onclick="quickReset('warfare')">⚡ Quick Reset → warfare</button>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">⚔️ Warfare — F13-F16</div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="startWarfare()">▶ Iniciar Warfare</button>
+        <button class="btn btn-danger" onclick="stopWarfare()">⏹ Parar</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadWarfareState()">Ver Estado</button>
+      </div>
+      <div id="warfare-state-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🏁 Gincana — F12</div>
+      <div class="field"><label>max_ticks</label><input type="number" id="gincana-max-ticks" value="400" min="100"></div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="startGincana()">▶ Iniciar Gincana</button>
+        <button class="btn btn-danger" onclick="stopGincana()">⏹ Parar</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadGincanaState()">Estado</button>
+      </div>
+      <div id="gincana-state-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🪨 Arremesso de Pedra — F14</div>
+      <div class="grid-2">
+        <div class="field"><label>agent_id</label><input type="text" id="throw-agent" placeholder="ID do agente"></div>
+        <div class="field"></div>
+        <div class="field"><label>Target X</label><input type="number" id="throw-x" placeholder="X"></div>
+        <div class="field"><label>Target Y</label><input type="number" id="throw-y" placeholder="Y"></div>
+      </div>
+      <div class="btn-row"><button class="btn btn-danger" onclick="throwStone()">🪨 Arremessar</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadCombatConfig()">Config Combate</button>
+      </div>
+      <div id="throw-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🎭 Papéis Táticos — F15</div>
+      <div class="field"><label>Team (alpha / beta)</label>
+        <select id="team-id"><option value="alpha">alpha</option><option value="beta">beta</option></select>
+      </div>
+      <div class="field"><label>Papéis (JSON: {"agent_id":"scout",...}) — vazio = reequilibrar</label>
+        <textarea id="team-roles-json" placeholder='{"abc123":"scout","def456":"medic"}'></textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="setTeamRoles()">Definir Papéis</button>
+        <button class="btn btn-ghost btn-sm" onclick="getTeamRoles()">Ver Papéis</button>
+      </div>
+      <div id="roles-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🗺️ Território — F16</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="loadTerritory()">Ver Estado</button>
+      </div>
+      <div class="field" style="margin-top:10px"><label>Nome da zona</label><input type="text" id="zone-name" placeholder="ex: Centro de Controle"></div>
+      <div class="grid-2"><div class="field"><label>Zona X</label><input type="number" id="zone-x"></div>
+      <div class="field"><label>Zona Y</label><input type="number" id="zone-y"></div></div>
+      <div class="btn-row"><button class="btn btn-warn" onclick="configZone()">Configurar Zona</button></div>
+      <div id="territory-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📊 Estado Warfare Completo</div>
+      <div id="warfare-full-out" class="output" style="max-height:260px">—</div>
+      <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="loadWarfareFull()">Carregar</button></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ ECONOMIA ════════════ -->
+<div class="panel" id="panel-economia">
+  <div class="prereq-banner">
+    <div>
+      <span class="prereq-badge">⚠️ Pré-requisito</span>
+      <span class="prereq-text" style="margin-left:8px">Modo <strong>economy</strong> para crafting/contratos/mercado. GangWar também aceita <strong>gangwar</strong> ou <strong>hybrid</strong>. Atual: <strong id="prereq-econ-mode">—</strong></span>
+    </div>
+    <div style="display:flex;gap:6px">
+      <button class="btn-quick" onclick="quickReset('economy')">⚡ economy</button>
+      <button class="btn-quick" onclick="quickReset('gangwar')" style="background:#ef4444;color:#fff">⚡ gangwar</button>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">💰 Economia — F17/F10</div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="startEconomy()">▶ Iniciar Economia</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadEconomyState()">Estado</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadCoins()">Saldos</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadRecipes()">Receitas</button>
+      </div>
+      <div id="econ-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔨 Craft — F10</div>
+      <div class="field"><label>agent_id</label><input type="text" id="craft-agent" placeholder="ID do agente"></div>
+      <div class="field"><label>Receita</label>
+        <select id="craft-recipe">
+          <option value="axe">axe (machado)</option><option value="raft">raft (jangada)</option>
+          <option value="wall">wall (parede)</option><option value="torch">torch (tocha)</option>
+          <option value="bandage">bandage (curativo)</option>
+        </select>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="craftItem()">Craftar</button></div>
+      <div id="craft-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🏗️ Build — F10</div>
+      <div class="field"><label>agent_id</label><input type="text" id="build-agent" placeholder="ID do agente"></div>
+      <div class="field"><label>Estrutura</label>
+        <select id="build-type"><option value="wall">wall</option><option value="raft">raft</option></select>
+      </div>
+      <div class="grid-2">
+        <div class="field"><label>X</label><input type="number" id="build-x" placeholder="X"></div>
+        <div class="field"><label>Y</label><input type="number" id="build-y" placeholder="Y"></div>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="buildStructure()">Construir</button></div>
+      <div id="build-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🔄 Trade P2P — F17</div>
+      <div class="field"><label>seller_id</label><input type="text" id="trade-seller" placeholder="ID vendedor"></div>
+      <div class="field"><label>buyer_id</label><input type="text" id="trade-buyer" placeholder="ID comprador"></div>
+      <div class="field"><label>Item</label><input type="text" id="trade-item" placeholder="ex: food"></div>
+      <div class="field"><label>Preço (moedas)</label><input type="number" id="trade-price" value="5" min="0"></div>
+      <div class="btn-row"><button class="btn btn-success" onclick="tradeItems()">Realizar Trade</button></div>
+      <div id="trade-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🏪 Mercado — F18</div>
+      <div class="field"><label>agent_id</label><input type="text" id="market-agent" placeholder="ID do agente"></div>
+      <div class="field"><label>Item</label><input type="text" id="market-item" placeholder="ex: food"></div>
+      <div class="field"><label>Quantidade</label><input type="number" id="market-qty" value="1" min="1"></div>
+      <div class="btn-row">
+        <button class="btn btn-success btn-sm" onclick="marketBuy()">🛒 Comprar</button>
+        <button class="btn btn-warn btn-sm" onclick="marketSell()">💸 Vender</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadMarketPrices()">Preços</button>
+        <button class="btn btn-ghost btn-sm" onclick="marketRecalculate()">Recalcular</button>
+      </div>
+      <div id="market-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Contratos — F19</div>
+      <div class="field"><label>requester_id</label><input type="text" id="contract-req" placeholder="ID solicitante"></div>
+      <div class="field"><label>Item solicitado</label><input type="text" id="contract-item" placeholder="ex: food"></div>
+      <div class="grid-2">
+        <div class="field"><label>Qtd</label><input type="number" id="contract-qty" value="3" min="1"></div>
+        <div class="field"><label>Recompensa</label><input type="number" id="contract-reward" value="10" min="1"></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-sm" onclick="postContract()">Publicar</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadContracts()">Listar</button>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Cumprir contrato ID</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="fulfill-contract-id" placeholder="ID do contrato">
+          <input type="text" id="fulfill-agent-id" placeholder="agent_id do executor">
+          <button class="btn btn-success btn-sm" onclick="fulfillContract()">✓</button>
+        </div>
+      </div>
+      <div id="contract-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-title">💣 GangWar — F20</div>
+    <div class="grid-3">
+      <div>
+        <div class="field"><label>max_ticks</label><input type="number" id="gw-ticks" value="300" min="50"></div>
+        <div class="btn-row">
+          <button class="btn btn-success btn-sm" onclick="startGangWar()">▶ Iniciar</button>
+          <button class="btn btn-danger btn-sm" onclick="stopGangWar()">⏹ Parar</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadGangWarState()">Estado</button>
+        </div>
+      </div>
+      <div>
+        <div class="field"><label>Sabotador (agent_id)</label><input type="text" id="sab-agent" placeholder="ID do agente"></div>
+        <div class="field"><label>Gangue alvo</label>
+          <select id="sab-target"><option value="beta">beta</option><option value="alpha">alpha</option></select>
+        </div>
+        <div class="btn-row"><button class="btn btn-danger btn-sm" onclick="sabotage()">💥 Sabotar</button></div>
+      </div>
+      <div>
+        <div class="field"><label>Black Market — Item</label>
+          <input type="text" id="bm-item" placeholder="ex: bomb"></div>
+        <div class="field"><label>Comprador (agent_id)</label><input type="text" id="bm-buyer" placeholder="ID"></div>
+        <div class="btn-row">
+          <button class="btn btn-warn btn-sm" onclick="bmBuy()">🛒 Comprar BM</button>
+          <button class="btn btn-ghost btn-sm" onclick="loadBMPrices()">Preços BM</button>
+        </div>
+      </div>
+    </div>
+    <div id="gw-out" class="output" style="margin-top:10px;display:none"></div>
+  </div>
+</div>
+
+<!-- ════════════ WEBHOOKS ════════════ -->
+<div class="panel" id="panel-webhooks">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">➕ Registrar Webhook</div>
+      <div class="field"><label>owner_id</label><input type="text" id="wh-owner" placeholder="user123"></div>
+      <div class="field"><label>URL</label><input type="url" id="wh-url" placeholder="https://..."></div>
+      <div class="field"><label>Eventos (vírgula separado ou "all")</label>
+        <input type="text" id="wh-events" value="all" placeholder="all, trade, agent_dead, ...">
+      </div>
+      <div class="field"><label>Secret (opcional)</label><input type="text" id="wh-secret" placeholder="hmac secret"></div>
+      <div class="field"><label>max_retries (1-5)</label><input type="number" id="wh-retries" value="3" min="1" max="5"></div>
+      <div class="btn-row">
+        <button class="btn btn-success" onclick="registerWebhook()">Registrar</button>
+      </div>
+      <div id="wh-reg-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Listar e Testar</div>
+      <div class="field"><label>owner_id</label><input type="text" id="wh-list-owner" placeholder="owner_id"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="listWebhooks()">Listar</button>
+        <button class="btn btn-primary btn-sm" onclick="testWebhook()">🔔 Testar</button>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Deletar webhook_id</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="wh-del-id" placeholder="ID do webhook">
+          <input type="text" id="wh-del-owner" placeholder="owner_id">
+          <button class="btn btn-danger btn-sm" onclick="deleteWebhook()">🗑</button>
+        </div>
+      </div>
+      <div id="wh-list-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">📦 Histórico de Entregas (admin)</div>
+      <div class="field"><label>webhook_id (opcional)</label><input type="text" id="wh-hist-id" placeholder="deixe vazio para todos"></div>
+      <div class="field"><label>Limite</label><input type="number" id="wh-hist-limit" value="20" min="1" max="200"></div>
+      <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="loadDeliveries()">Carregar</button></div>
+      <div id="wh-hist-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📊 Stats e Tipos de Evento</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="loadWebhookStats()">Stats</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadEventTypes()">Tipos de Evento</button>
+      </div>
+      <div id="wh-stats-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ BENCHMARK ════════════ -->
+<div class="panel" id="panel-benchmark">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">⚖️ Comparador A/B — F02</div>
+      <div class="grid-2">
+        <div class="field"><label>Perfil A</label>
+          <select id="ab-profile-a"><option>claude-kiro</option><option>claude-haiku</option><option>kimi-thinking</option><option>kimi-groq</option><option>gemini-flash</option><option>llama-groq</option></select>
+        </div>
+        <div class="field"><label>Perfil B</label>
+          <select id="ab-profile-b"><option>claude-haiku</option><option>claude-kiro</option><option>kimi-thinking</option><option>kimi-groq</option><option>gemini-flash</option><option>llama-groq</option></select>
+        </div>
+        <div class="field"><label>game_mode</label>
+          <select id="ab-mode"><option>survival</option><option>gincana</option><option>warfare</option><option>economy</option></select>
+        </div>
+        <div class="field"><label>Ticks</label><input type="number" id="ab-ticks" value="200" min="50"></div>
+      </div>
+      <div class="btn-row"><button class="btn btn-primary" onclick="runAB()">▶ Rodar A/B</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadABResults()">Histórico</button>
+      </div>
+      <div id="ab-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">📋 Relatório de Run A/B</div>
+      <div class="field"><label>run_id</label><input type="text" id="ab-run-id" placeholder="ID do run"></div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="loadABRun()">Carregar Run</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadABReport()">Relatório Completo</button>
+      </div>
+      <div id="ab-report-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🏆 Temporadas e ELO — F06</div>
+      <div class="field"><label>Nome da Temporada</label><input type="text" id="season-name" placeholder="Season 1"></div>
+      <div class="btn-row">
+        <button class="btn btn-success btn-sm" onclick="createSeason()">Criar</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadSeasons()">Listar</button>
+      </div>
+      <div class="field" style="margin-top:8px"><label>ELO — profile_id</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="elo-profile" placeholder="claude-kiro">
+          <button class="btn btn-ghost btn-sm" onclick="loadElo()">Ver ELO</button>
+        </div>
+      </div>
+      <div id="season-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🗂️ Versionamento de Perfis — F09</div>
+      <div class="field"><label>profile_id</label><input type="text" id="ver-profile" placeholder="claude-kiro"></div>
+      <div class="field"><label>Nota da versão</label><input type="text" id="ver-note" placeholder="Ex: ajuste de temperatura"></div>
+      <div class="field"><label>Temperatura (snapshot extra, opcional)</label>
+        <input type="number" id="ver-temp" step="0.05" placeholder="0.7">
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary btn-sm" onclick="saveProfileVersion()">Salvar Versão</button>
+        <button class="btn btn-ghost btn-sm" onclick="listProfileVersions()">Listar</button>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Ativar versão (número)</label>
+        <div style="display:flex;gap:6px">
+          <input type="number" id="ver-activate-num" placeholder="1">
+          <button class="btn btn-warn btn-sm" onclick="activateVersion()">Ativar</button>
+        </div>
+      </div>
+      <div id="ver-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+<!-- ════════════ AVANÇADO ════════════ -->
+<div class="panel" id="panel-avancado">
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🏟️ Torneios</div>
+      <div class="field"><label>Perfis (vírgula separado)</label>
+        <input type="text" id="tourn-profiles" placeholder="claude-kiro,claude-haiku">
+      </div>
+      <div class="field"><label>Duração (ticks)</label><input type="number" id="tourn-ticks" value="200"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="createTournament()">Criar Torneio</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadTournaments()">Listar</button>
+      </div>
+      <div id="tourn-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🌩️ Eventos Dinâmicos — F04</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="loadActiveEvents()">Ativos</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadEventHistory()">Histórico</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadEventTemplates()">Templates</button>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Disparar evento</label>
+        <div style="display:flex;gap:6px">
+          <select id="trigger-event-type" style="flex:1;background:var(--surface2);border:1px solid var(--border);color:var(--text);padding:6px 8px;border-radius:7px">
+            <option>storm</option><option>drought</option><option>supply_drop</option><option>radio</option><option>eclipse</option>
+          </select>
+          <button class="btn btn-warn btn-sm" onclick="triggerEvent()">⚡</button>
+        </div>
+      </div>
+      <div id="event-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+
+  <div class="grid-2">
+    <div class="card">
+      <div class="card-title">🎯 Missões — F08</div>
+      <div class="field"><label>agent_id</label><input type="text" id="mission-agent" placeholder="ID do agente"></div>
+      <div class="field"><label>mission_id</label><input type="text" id="mission-id" placeholder="ou deixe vazio para aleatório"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="assignMission()">Atribuir Missão</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadMissionCatalog()">Catálogo</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadMissionsProgress()">Progresso Geral</button>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Ver missão do agente</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="mission-view-agent" placeholder="agent_id">
+          <button class="btn btn-ghost btn-sm" onclick="loadAgentMission()">Ver</button>
+        </div>
+      </div>
+      <div id="mission-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">🧠 Memória e Rate Limit</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost btn-sm" onclick="loadMemories()">Ver Memórias</button>
+        <button class="btn btn-ghost btn-sm" onclick="loadRateLimit()">Rate Limit</button>
+      </div>
+      <div class="field" style="margin-top:8px"><label>Salvar memória — agent_id</label>
+        <div style="display:flex;gap:6px">
+          <input type="text" id="mem-agent" placeholder="ID do agente">
+          <button class="btn btn-primary btn-sm" onclick="saveMemory()">Salvar</button>
+        </div>
+      </div>
+      <div id="mem-out" class="output" style="margin-top:10px;display:none"></div>
+    </div>
+  </div>
+</div>
+
+</div><!-- /panels -->
+
+<div id="toast-container"></div>
+
+<script src="admin_v3.js?1773865637"></script>
+</body>
+</html>

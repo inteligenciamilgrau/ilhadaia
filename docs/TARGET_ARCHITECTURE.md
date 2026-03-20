@@ -1,128 +1,107 @@
-# Arquitetura Alvo
+# Target Architecture - BBBia
 
-Este documento descreve a direcao de modularizacao recomendada sem reescrever a stack atual.
+Atualizado em: 2026-03-18
 
-## Objetivo
+## Contexto
 
-Levar o projeto de um backend monolitico funcional para um arranjo mais claro entre:
+A base atual esta funcional e coberta por testes, mas o crescimento de features deixou `backend/main.py` com alto acoplamento. Este documento define a arquitetura alvo incremental sem reescrita total.
 
-- API HTTP/WebSocket
-- simulacao do mundo
-- runtime de IA
-- persistencia
+## Estado atual resumido
 
-## Principios
+- API + orquestracao + parte de integracao concentradas em `backend/main.py`.
+- `World` e engines em `backend/world.py` e `backend/runtime/*`.
+- Persistencia em `backend/storage/*`.
+- Frontend servido por `/frontend`.
 
-1. manter FastAPI e o frontend web atual
-2. modularizar sem reescrita total
-3. preservar o fluxo de benchmark entre perfis
-4. evitar nova infraestrutura antes da necessidade real
-5. manter o setup local simples
+## Objetivo da arquitetura alvo
 
-## Topologia desejada
+Separar responsabilidades para facilitar:
 
-```text
-web-observer
-    |
-    v
-world-api
-    |
-    +--------------------+
-    |                    |
-    v                    v
-simulation-core     agent-runtime
-    |                    |
-    +---------+----------+
-              |
-              v
-            storage
-```
+- manutencao por dominio
+- testes isolados
+- evolucao para multi-worker
+- onboarding tecnico
 
-## Recorte de modulos desejado
+## Desenho alvo
 
 ```text
 backend/
-├── api/
-│   ├── app.py
-│   ├── deps.py
-│   ├── routes_agents.py
-│   ├── routes_admin.py
-│   ├── routes_sessions.py
-│   └── ws_manager.py
-├── simulation/
-│   ├── world.py
-│   ├── actions.py
-│   ├── entities.py
-│   └── serializer.py
-├── runtime/
-│   ├── thinker.py
-│   ├── profiles.py
-│   ├── memory.py
-│   └── adapters/
-└── storage/
-    ├── session_store.py
-    ├── replay_store.py
-    ├── decision_log.py
-    ├── memory_store.py
-    └── webhook_manager.py
+  api/
+    app.py
+    deps.py
+    routes/
+      world.py
+      agents.py
+      admin.py
+      modes.py
+      economy.py
+      webhooks.py
+      analytics.py
+    ws/
+      manager.py
+      broadcaster.py
+  services/
+    world_service.py
+    feature_service.py
+    webhook_service.py
+    benchmark_service.py
+  simulation/
+    world.py
+    entities.py
+    ticks.py
+    serializers.py
+  runtime/
+    thinker.py
+    profiles.py
+    engines/
+      gincana_engine.py
+      warfare_engine.py
+      economy_engine.py
+      gangwar_engine.py
+  storage/
+    session_store.py
+    decision_log.py
+    replay_store.py
+    memory_store.py
+    webhook_manager.py
 ```
 
-## Contratos que valem a pena preservar
+## Contratos a preservar
 
-### `AgentProfile`
+- Schemas e payloads dos endpoints em `docs/API_REFERENCE.md`.
+- Semantica de `game_mode` no reset e nos aliases de feature.
+- Formato de mensagens WebSocket (`init`, `update`, `reset`).
 
-Exemplo alinhado com o catalogo atual:
+## Plano incremental de migracao
 
-```json
-{
-  "profile_id": "claude-kiro",
-  "provider": "omnirouter",
-  "model": "kr/claude-sonnet-4.5",
-  "temperature": 0.7,
-  "max_tokens": 400,
-  "token_budget": 15000,
-  "cooldown_ticks": 4
-}
-```
+### Fase 1 - Extracao de rotas
 
-### `AgentRegistration`
+- criar modulos de rotas por dominio
+- manter `main.py` como orquestrador temporario
 
-```json
-{
-  "owner_id": "diego",
-  "owner_name": "Diego",
-  "agent_name": "AlphaBot",
-  "persona": "Curioso e competitivo",
-  "profile_id": "claude-kiro"
-}
-```
+### Fase 2 - Servicos
 
-### `ActionDecision`
+- mover regras HTTP-orientadas para camada `services`
+- reduzir logica inline nos handlers
 
-```json
-{
-  "thought": "Preciso sair do frio e continuar vivo",
-  "speak": "Vou voltar para casa antes da noite apertar",
-  "intent": "survive_and_coordinate",
-  "action": "move_to",
-  "params": {
-    "target_x": 2,
-    "target_y": 17
-  }
-}
-```
+### Fase 3 - WS desacoplado
 
-## Problemas que esta arquitetura alvo resolve
+- extrair broadcaster para componente proprio
+- preparar interface para pub/sub externo
 
-- reduz o acoplamento atual de `main.py`
-- permite testar simulacao sem subir a API inteira
-- prepara o sistema para trocar o broadcast local por um barramento entre processos
-- torna os componentes de runtime e storage mais reutilizaveis
+### Fase 4 - Escalabilidade
 
-## Passos incrementais sugeridos
+- introduzir barramento (ex.: Redis pub/sub)
+- habilitar mais de um worker com consistencia de broadcast
 
-1. extrair rotas de `main.py` para `backend/api/`
-2. mover `world_loop()` e coordenacao de estado para um servico dedicado
-3. isolar serializacao de estado e regras de replay
-4. introduzir um transport layer para broadcast
-5. revisar paths de storage para nao depender do diretorio de boot
+## Riscos
+
+- regressao de contratos se a extracao nao for guiada por testes.
+- aumento de complexidade de deploy sem ganho imediato se a ordem de migracao for invertida.
+
+## Criterios de sucesso
+
+- `main.py` reduzido para bootstrap + wiring.
+- contratos de API mantidos.
+- suite de testes segue verde.
+- pronto para escalar sem refatoracao estrutural adicional.

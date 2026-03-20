@@ -1,109 +1,71 @@
-# Plano de Implementacao
+# Improvement Plan - BBBia
 
-Este documento resume o que ja foi consolidado no projeto e o que foi ajustado especificamente nesta branch para fechar o ciclo de operacao, documentacao e setup local.
+Atualizado em: 2026-03-18
 
-## Base consolidada antes desta branch
+## Objetivo
 
-Ja existiam no repositorio:
+Consolidar o que foi entregue nas rodadas recentes e definir o plano curto para chegar em entrega 100% (backend + frontend + operacao).
 
-- simulacao em tempo real com `World`
-- persistencia de sessoes, scoreboard, memoria e replay
-- adapters Gemini + OpenAI-compatible
-- `Thinker` para orquestracao das decisoes
-- dashboard analitico
-- endpoints de torneio, exportacao, memoria e webhook
+## Melhorias consolidadas
 
-## Ajustes consolidados nesta branch
+### 1. Features F01..F20 no backend
 
-### 1. Frontend servido pelo backend
+- Endpoints e regras de dominio implementados para todos os blocos planejados.
+- Modos `gincana`, `warfare`, `economy`, `gangwar` e `hybrid` operacionais.
+- Engines especializadas integradas ao ciclo de ticks do `World`.
 
-Mudanca:
+### 2. Contratos de API unificados
 
-- `backend/main.py` monta `StaticFiles` em `/frontend`
+- Contratos de `docs/features` reconciliados com `backend/main.py`.
+- Aliases de compatibilidade adicionados para varios endpoints.
+- Referencia central atualizada em `docs/API_REFERENCE.md`.
 
-Impacto:
+### 3. Cobertura e estabilidade backend
 
-- `index.html`, `dashboard.html` e `models.html` agora fazem parte do fluxo oficial de uso
-- a documentacao deixa de orientar `file://`
+- Suite backend atual: `200 passed, 1 skipped`.
+- Regressao ampla cobrindo features de modos, economia, webhooks e aliases.
 
-### 2. Catalogo de perfis free-first
+### 4. Pacote de documentacao de fechamento
 
-Mudanca:
+- Status consolidado em `docs/features/IMPLEMENTATION_STATUS_2026-03-18.md`.
+- Checklist central atualizado em `docs/features/CHECKLIST.md`.
+- Matriz de QA frontend criada.
+- Matriz de cobertura de endpoints no frontend criada.
+- Cobertura de contratos no frontend concluida (`48/48`) via `Feature Ops`.
 
-- `backend/runtime/profiles.py` foi atualizado para um conjunto focado em OmniRoute + perfis gratuitos
-- fallback tecnico passou para `claude-kiro`
+## Gap atual para entrega 100%
 
-Perfis atuais:
+1. QA manual desktop/mobile ainda pendente.
+2. Observabilidade por feature ainda parcial.
 
-- `claude-kiro`
-- `claude-haiku`
-- `kimi-thinking`
-- `qwen-coder`
-- `kimi-groq`
-- `gemini-flash`
-- `llama-groq`
+## Plano de melhoria (curto prazo)
 
-### 3. Defaults operacionais alinhados
+### Etapa A - QA formal frontend
 
-Mudanca:
+- Executar checklist em desktop e mobile.
+- Registrar evidencias por item.
+- Abrir bugs com reproducao quando houver falha.
 
-- `POST /agents/register` agora defaulta para `claude-kiro`
-- o estado serializado do mundo usa `claude-kiro` como fallback de `profile_id`
-- os NPCs iniciais usam uma rotacao gratuita predefinida
+### Etapa B - Observabilidade
 
-### 4. Console de modelos
+- Adicionar visoes por feature no dashboard/admin.
+- Expor indicadores de sucesso/falha por fluxo critico.
 
-Mudanca:
+### Etapa C - Fechamento documental final
 
-- `frontend/models.html` passou a ser uma interface oficial do sistema
+- Atualizar checklist e status.
+- Revisar API reference caso existam ajustes finais de contrato.
 
-Capacidades:
+## Metricas de pronto
 
-- listar perfis
-- testar chamadas por modelo
-- registrar agentes
-- inspecionar agentes ativos
+- Backend: suite verde sem regressao.
+- Frontend: cobertura funcional das features priorizadas.
+- QA: checklist concluido com evidencia.
+- Docs: status e guias atualizados sem divergencia com codigo.
 
-Ajuste feito nesta continuacao:
+## Referencias
 
-- o select de cadastro agora sincroniza com `GET /profiles`, evitando divergencia entre backend e UI
-
-### 5. Operacao limpa do repositorio
-
-Mudanca:
-
-- `.gitignore` cobre banco, WAL, replays, logs e JSONs de runtime
-- `backend/data/ilhadaia.db`, `backend/data/ilhadaia.db-shm`, `backend/data/ilhadaia.db-wal` e `backend/world_settings.json` sairam do versionamento
-- o workspace foi limpo para o backend voltar a gerar estado do zero
-
-### 6. Documentacao reconciliada
-
-Arquivos atualizados:
-
-- `README.md`
-- `docs/ARCHITECTURE.md`
-- `docs/API_REFERENCE.md`
-- `docs/DEVELOPMENT_GUIDE.md`
-- `docs/BACKLOG.md`
-- `docs/CURRENT_STATE_AUDIT.md`
-- `docs/TARGET_ARCHITECTURE.md`
-
-## Validacao executada
-
-Comando rodado nesta atualizacao:
-
-```bash
-pytest backend/tests/test_engine.py -q
-```
-
-Resultado:
-
-- `33 passed`
-
-## Proximo passo tecnico recomendavel
-
-Se houver nova rodada de trabalho estrutural, o melhor ROI agora e:
-
-1. quebrar `backend/main.py` em modulos de rota e servico
-2. desacoplar broadcast WebSocket do processo unico
-3. resolver paths de storage independentemente do diretorio de boot
+- `docs/features/CHECKLIST.md`
+- `docs/features/IMPLEMENTATION_STATUS_2026-03-18.md`
+- `docs/features/FRONTEND_QA_CHECKLIST_2026-03-18.md`
+- `docs/features/FRONTEND_ENDPOINT_COVERAGE_2026-03-18.md`

@@ -72,7 +72,32 @@ class DecisionLog:
             result=reason,
         ))
 
+    def get_recent(self, session_id: str, agent_id: str, n: int = 5) -> list:
+        """Lê as últimas N decisões de um agente no arquivo NDJSON da sessão."""
+        import os
+        path = self.log_dir / f"{session_id}.ndjson"
+        if not path.exists():
+            return []
+        records = []
+        try:
+            with open(path, encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                        if rec.get("agent_id") == agent_id:
+                            records.append(rec)
+                    except json.JSONDecodeError:
+                        pass
+        except OSError:
+            return []
+        # return last N
+        return records[-n:] if len(records) >= n else records
+
     def close(self) -> None:
         if self._file:
             self._file.close()
             self._file = None
+
